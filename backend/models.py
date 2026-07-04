@@ -43,7 +43,7 @@ class Reviews(Base):
     request_reference: Mapped[int] = mapped_column(ForeignKey("requests.request_id"))
     reviewer_reference: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     decision: Mapped[str] = mapped_column(String(50))
-    comment_text: Mapped[Optional[str]] = mapped_column(Text) # this would be optional is it was passed, but mandatory if nt passed. not sure how to implement
+    comment_text: Mapped[Optional[str]] = mapped_column(Text)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (
