@@ -5,4 +5,5 @@ node_modules/
 .venv/
 venv/
 .DS_Store
-
+*.db
+backend/db_example.py
