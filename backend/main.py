@@ -23,6 +23,11 @@ def get_users(db: Session = Depends(get_db)):
 def get_requests(db: Session = Depends(get_db)):
     return db.query(Requests).all() # Show me all requests in the system (Useful for admin)
 
+
+@app.get("/reviews")
+def get_reviews(db: Session = Depends(get_db)):
+    return db.query(Reviews).all()
+
 class RequestCreate(BaseModel):
     requester_reference: int
     request_type: str
