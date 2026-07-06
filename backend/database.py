@@ -15,3 +15,10 @@ engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{db_host}:{db_p
 
 class Base(DeclarativeBase):
     pass
+
+def get_db():
+    db = Session(engine)
+    try:
+        yield db
+    finally:
+        db.close()

@@ -1,22 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import engine
+from database import engine, get_db
 from models import User, Requests, Reviews
 from typing import Optional
 from enum import Enum
-from auth import hash_password, verify_password, create_access_token
+from auth import hash_password, verify_password, create_access_token, get_current_user
 
 
 app = FastAPI()
 
-
-def get_db():
-    db = Session(engine)
-    try:
-        yield db
-    finally:
-        db.close()
 
 @app.get("/users")
 def get_users(db: Session = Depends(get_db)):
@@ -32,7 +25,6 @@ def get_reviews(db: Session = Depends(get_db)):
     return db.query(Reviews).all()
 
 class RequestCreate(BaseModel):
-    requester_reference: int
     request_type: str
     description: str | None = None
     priority: str = "P1"
@@ -61,9 +53,9 @@ class UserLogin(BaseModel):
     
 
 @app.post("/requests")
-def create_request(request: RequestCreate, db: Session = Depends(get_db)):
+def create_request(request: RequestCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     new_request = Requests( 
-        requester_reference=request.requester_reference,
+        requester_reference=current_user.user_id,
         request_type=request.request_type,
         description=request.description,
         priority=request.priority
