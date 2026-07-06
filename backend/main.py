@@ -5,7 +5,8 @@ from database import engine
 from models import User, Requests, Reviews
 from typing import Optional
 from enum import Enum
-from auth import hash_password
+from auth import hash_password, verify_password, create_access_token
+
 
 app = FastAPI()
 
@@ -52,6 +53,10 @@ class UserCreate(BaseModel):
     email: str
     password: str
     role: RoleEnum = RoleEnum.requester 
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
     
 
@@ -100,4 +105,13 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     return {"user_id": new_user.user_id, "name": new_user.name, "email": new_user.email, "role": new_user.role}
+
+@app.post("/login")
+def user_login(login: UserLogin, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.email == login.email).first()
+    if not existing_user or not verify_password(login.password, existing_user.password):
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+    
+    token = create_access_token({"sub": str(existing_user.user_id)})
+    return {"access_token": token, "token_type": "bearer"}
 
