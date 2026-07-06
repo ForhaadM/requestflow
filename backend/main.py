@@ -31,7 +31,6 @@ class RequestCreate(BaseModel):
 
 class ReviewCreate(BaseModel):
     request_reference: int
-    reviewer_reference: int
     decision: str 
     comment_text: Optional[str] = None
 
@@ -67,13 +66,13 @@ def create_request(request: RequestCreate, db: Session = Depends(get_db), curren
 
 
 @app.post("/reviews")
-def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
+def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if review.decision == "NOT APPROVED" and not review.comment_text:
         raise HTTPException(status_code=400, detail="A comment is required when rejecting a request.")
 
     new_review = Reviews(
         request_reference=review.request_reference,
-        reviewer_reference=review.reviewer_reference,
+        reviewer_reference=current_user.user_id,
         decision=review.decision,
         comment_text=review.comment_text
     )
