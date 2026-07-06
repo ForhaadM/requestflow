@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from database import engine
 from models import User, Requests, Reviews
 from typing import Optional
+from enum import Enum
+from auth import hash_password
 
 app = FastAPI()
 
@@ -40,6 +42,17 @@ class ReviewCreate(BaseModel):
     decision: str 
     comment_text: Optional[str] = None
 
+class RoleEnum(str, Enum):
+    requester = "requester"
+    reviewer = "reviewer"
+    admin = "admin"
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: RoleEnum = RoleEnum.requester 
+
     
 
 @app.post("/requests")
@@ -71,3 +84,20 @@ def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_review)
     return new_review
+
+@app.post("/users")
+def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    new_user = User(
+        name = user.name,
+        email = user.email,
+        password = hash_password(user.password),
+        role = user.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"user_id": new_user.user_id, "name": new_user.name, "email": new_user.email, "role": new_user.role}
+
