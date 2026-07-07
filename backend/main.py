@@ -16,13 +16,20 @@ def get_users(db: Session = Depends(get_db)):
     return db.query(User).all()
 
 @app.get("/requests")
-def get_requests(db: Session = Depends(get_db)):
+def get_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+
+    if current_user.role not in ["admin"]:
+        raise HTTPException(status_code=403,detail="Only admins can see all requests.") 
     return db.query(Requests).all() # Show me all requests in the system (Useful for admin)
 
 
 @app.get("/reviews")
 def get_reviews(db: Session = Depends(get_db)):
     return db.query(Reviews).all()
+
+@app.get("/requests/me")
+def my_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Requests).filter(Requests.requester_reference == current_user.user_id).all()
 
 class RequestCreate(BaseModel):
     request_type: str
