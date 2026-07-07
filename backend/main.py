@@ -36,6 +36,16 @@ def get_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_
 def my_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return db.query(Requests).filter(Requests.requester_reference == current_user.user_id).all()
 
+@app.get("/requests/{request_id}")
+def get_request(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    if current_user.role == "admin" or current_user.user_id == existing_request.requester_reference:
+        return existing_request 
+    else:
+        raise HTTPException(status_code=403, detail="Not Authorized to see request.")
+        
 class RequestCreate(BaseModel):
     request_type: str
     description: str | None = None
