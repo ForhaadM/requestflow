@@ -67,9 +67,13 @@ def create_request(request: RequestCreate, db: Session = Depends(get_db), curren
 
 @app.post("/reviews")
 def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    
-    if current_user.role not in ["reviwer", "admin"]:
+        
+    if current_user.role not in ["reviewer", "admin"]:
         raise HTTPException(status_code=403,detail="Only reviewers or admins can review requests.") 
+    
+    existing_request = db.query(Requests).filter(Requests.request_id == review.request_reference).first()
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
     
     if review.decision == "NOT APPROVED" and not review.comment_text:
         raise HTTPException(status_code=400, detail="A comment is required when rejecting a request.")
