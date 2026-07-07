@@ -39,6 +39,11 @@ class RoleEnum(str, Enum):
     reviewer = "reviewer"
     admin = "admin"
 
+class StatusEnum(str, Enum):
+    open_request = "open"
+    in_progress_request = "in-progress"
+    closed_request = "closed"
+
 class UserCreate(BaseModel):
     name: str
     email: str
@@ -48,6 +53,10 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class StatusUpdate(BaseModel):
+    status: StatusEnum 
+
 
     
 
@@ -114,3 +123,16 @@ def user_login(login: UserLogin, db: Session = Depends(get_db)):
     token = create_access_token({"sub": str(existing_user.user_id)})
     return {"access_token": token, "token_type": "bearer"}
 
+@app.patch("/requests/{request_id}/status")
+def update_request_status(request_id: int, status_update: StatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["reviewer", "admin"]:
+        raise HTTPException(status_code=403,detail="Only reviewers or admins can update the request status.") 
+    
+    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+
+    existing_request.status = status_update.status.value
+    db.commit()
+    db.refresh(existing_request)
+    return existing_request
