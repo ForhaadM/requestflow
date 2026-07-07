@@ -24,8 +24,13 @@ def get_requests(db: Session = Depends(get_db), current_user: User = Depends(get
 
 
 @app.get("/reviews")
-def get_reviews(db: Session = Depends(get_db)):
-    return db.query(Reviews).all()
+def get_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == "admin":
+        return db.query(Reviews).all()
+    elif current_user.role == "reviewer":
+        return db.query(Reviews).filter(Reviews.reviewer_reference == current_user.user_id).all()
+    else: 
+        return []
 
 @app.get("/requests/me")
 def my_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
