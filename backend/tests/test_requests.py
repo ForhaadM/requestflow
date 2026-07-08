@@ -1,10 +1,22 @@
+def test_create_request_without_description_fails(client, auth_headers):
+    response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    assert response.status_code == 400
+
+
+def test_create_request_with_blank_description_fails(client, auth_headers):
+    response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "   "}, headers=auth_headers
+    )
+    assert response.status_code == 400
+
+
 def test_get_all_requests_forbidden_for_non_admin(client, auth_headers):
     response = client.get("/requests", headers=auth_headers)
     assert response.status_code == 403
 
 
 def test_get_all_requests_allowed_for_admin(client, auth_headers, make_user):
-    client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
 
     admin = make_user(role="admin")
     response = client.get("/requests", headers=admin["headers"])
@@ -13,10 +25,10 @@ def test_get_all_requests_allowed_for_admin(client, auth_headers, make_user):
 
 
 def test_get_my_requests_returns_only_own(client, auth_headers, make_user):
-    client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
 
     other = make_user(role="requester")
-    client.post("/requests", json={"request_type": "software"}, headers=other["headers"])
+    client.post("/requests", json={"request_type": "software", "description": "Test request"}, headers=other["headers"])
 
     response = client.get("/requests/me", headers=auth_headers)
     assert response.status_code == 200
@@ -31,7 +43,7 @@ def test_get_request_by_id_not_found(client, auth_headers):
 
 
 def test_get_request_by_id_owner_can_view(client, auth_headers):
-    create_response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]
 
     response = client.get(f"/requests/{request_id}", headers=auth_headers)
@@ -40,7 +52,7 @@ def test_get_request_by_id_owner_can_view(client, auth_headers):
 
 
 def test_get_request_by_id_forbidden_for_other_user(client, auth_headers, make_user):
-    create_response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]
 
     other = make_user(role="requester")
@@ -49,7 +61,7 @@ def test_get_request_by_id_forbidden_for_other_user(client, auth_headers, make_u
 
 
 def test_get_request_by_id_admin_can_view_any(client, auth_headers, make_user):
-    create_response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]
 
     admin = make_user(role="admin")
@@ -58,7 +70,7 @@ def test_get_request_by_id_admin_can_view_any(client, auth_headers, make_user):
 
 
 def test_patch_status_forbidden_for_requester(client, auth_headers):
-    create_response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]
 
     response = client.patch(f"/requests/{request_id}/status", json={"status": "closed"}, headers=auth_headers)
@@ -72,7 +84,7 @@ def test_patch_status_not_found(client, make_user):
 
 
 def test_patch_status_success_for_reviewer(client, auth_headers, make_user):
-    create_response = client.post("/requests", json={"request_type": "hardware"}, headers=auth_headers)
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]
 
     reviewer = make_user(role="reviewer")

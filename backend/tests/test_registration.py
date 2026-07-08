@@ -23,3 +23,19 @@ def test_register_response_never_contains_password(client):
         json={"name": "New User", "email": "nopassword@example.com", "password": "pw12345"},
     )
     assert "password" not in response.json()
+
+
+def test_register_invalid_email_rejected(client):
+    response = client.post(
+        "/users",
+        json={"name": "Bad Email", "email": "not-an-email", "password": "pw12345"},
+    )
+    assert response.status_code == 422
+
+
+def test_register_short_password_rejected(client):
+    response = client.post(
+        "/users",
+        json={"name": "Short Pw", "email": "shortpw@example.com", "password": "abc"},
+    )
+    assert response.status_code == 422

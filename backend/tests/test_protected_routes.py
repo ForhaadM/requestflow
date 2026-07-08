@@ -26,6 +26,7 @@ def test_create_review_reviewer_reference_from_token(client, registered_user, au
     request_id = request_response.json()["request_id"]
 
     reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
     review_response = client.post(
         "/reviews",
         json={"request_reference": request_id, "decision": "APPROVED"},
@@ -72,6 +73,7 @@ def test_create_review_rejection_without_comment_fails(client, auth_headers, mak
     request_id = request_response.json()["request_id"]
 
     reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
     review_response = client.post(
         "/reviews",
         json={"request_reference": request_id, "decision": "NOT APPROVED"},

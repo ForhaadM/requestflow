@@ -27,13 +27,18 @@ class Requests(Base):
     request_type: Mapped[str] = mapped_column(String(50))
     description: Mapped[Optional[str]] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(String(20), default = "P1")
+    urgency_justification: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default = "open")
+    claimed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (
-    CheckConstraint("request_type IN ('access-request', 'hardware', 'software', 'bug-report')"),
+    CheckConstraint(
+        "request_type IN ('hardware', 'software', 'access-request', 'account-password', "
+        "'bug-report', 'network', 'onboarding-offboarding', 'facilities', 'other')"
+    ),
     CheckConstraint("priority IN ('P0', 'P1', 'P2', 'P3')"),
-    CheckConstraint("status IN ('open', 'in-progress', 'resolved', 'closed')"),
+    CheckConstraint("status IN ('open', 'in-progress', 'resolved', 'closed', 'approved', 'rejected')"),
 )
 
 class Reviews(Base):
