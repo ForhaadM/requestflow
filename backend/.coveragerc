@@ -1,0 +1,5 @@
+[run]
+omit =
+    tests/*
+    db_example.py
+    venv/*
