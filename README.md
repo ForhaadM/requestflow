@@ -5,7 +5,7 @@ A full-stack internal request management system for tracking approvals, reviews,
 
 ## Overview / Problem Statement
 
-Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow — modeled after internal request/approval systems used at companies like UWM, where I interned — with role-based permissions (requester, reviewer, admin), a conditional business rule requiring justification on rejected requests, and a full audit trail of who reviewed what and when.
+Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow with role-based permissions (requester, reviewer, admin), a conditional business rule requiring justification on rejected requests, and a full audit trail of who reviewed what and when.
 
 This project was built to demonstrate both software engineering skills (schema design, REST API development, authentication, containerization, cloud deployment) and business analysis skills (requirements modeling, workflow design, deliberate scoping decisions) relevant to both SWE and BA roles.
 
