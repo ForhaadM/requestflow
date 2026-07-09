@@ -1,4 +1,6 @@
 # RequestFlow
+[![CI](https://github.com/ForhaadM/requestflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ForhaadM/requestflow/actions/workflows/ci.yml)
+
 A full stack internal request management system for tracking approvals, reviews, and SLAs.
 
 # Overview / Problem Statement
