@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from database import engine, get_db
 from models import User, Requests, Reviews
 from typing import Optional
@@ -35,7 +35,16 @@ app.add_middleware(
 )
 
 
-@app.get("/users")
+class UserPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: int
+    name: str
+    email: str
+    role: str
+
+
+@app.get("/users", response_model=list[UserPublic])
 def get_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.user_id).all()
 
