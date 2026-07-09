@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -15,9 +16,19 @@ ISSUE_REQUEST_TYPES = {"bug-report", "network", "facilities"}
 
 app = FastAPI()
 
+# Comma-separated list of allowed frontend origins, e.g.:
+#   ALLOWED_ORIGINS=https://d111111abcdef8.cloudfront.net,https://requestflow.example.com
+# Defaults to the local Vite dev server so nothing changes for local dev.
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+allow_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
