@@ -96,7 +96,7 @@ pytest --cov=. --cov-report=term-missing
 
 ## Project Structure
 
-
+```
 requestFlow/
 ├── backend/
 │   ├── main.py              # FastAPI routes
@@ -116,6 +116,7 @@ requestFlow/
 ├── .github/workflows/ci.yml  # CI pipeline (tests + build on push/PR)
 ├── docker-compose.yaml       # Local PostgreSQL container
 └── deploy_checklist.md       # AWS deployment runbook
+```
 
 ## Screenshots
 
