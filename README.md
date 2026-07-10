@@ -79,8 +79,9 @@ RequestFlow is fully deployed on AWS with a custom domain and end-to-end HTTPS:
 3. From the project root: `docker compose up -d` (starts PostgreSQL)
 4. `python3 -m venv venv && source venv/bin/activate`
 5. `pip install -r requirements.txt --break-system-packages`
-6. `uvicorn main:app --reload`
-7. API docs available at `http://127.0.0.1:8000/docs`
+6. `alembic upgrade head` (applies database migrations — see [Database Migrations](#database-migrations) below)
+7. `uvicorn main:app --reload`
+8. API docs available at `http://127.0.0.1:8000/docs`
 
 **Frontend:**
 1. `cd frontend`, copy `.env.example` to `.env`
@@ -94,6 +95,25 @@ pytest
 pytest --cov=. --cov-report=term-missing
 ```
 
+## Database Migrations
+
+Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/), reading DB connection info from the same `POSTGRES_*` environment variables used by `database.py` (no separate/hardcoded connection string in `alembic.ini`).
+
+**Applying migrations (local dev):**
+```bash
+cd backend
+alembic upgrade head
+```
+
+**Making a schema change:**
+1. Edit `backend/models.py`
+2. Generate a migration from the diff: `alembic revision --autogenerate -m "short description"`
+3. **Review the generated file in `backend/alembic/versions/`** — autogenerate is a starting point, not a guarantee (e.g. it doesn't detect column renames)
+4. Apply it locally: `alembic upgrade head`
+5. Commit the migration file alongside the model change
+
+Schema changes should **always** go through this workflow now — not manual `ALTER TABLE` statements against RDS. Manual DDL is exactly what caused a schema-drift incident (columns present in `models.py` but missing in production), which motivated adopting Alembic.
+
 ## Project Structure
 
 ```
@@ -103,6 +123,8 @@ requestFlow/
 │   ├── models.py            # SQLAlchemy models
 │   ├── database.py          # DB connection, session management
 │   ├── auth.py               # Password hashing, JWT, auth dependency
+│   ├── alembic/               # Database migration scripts (env.py, versions/)
+│   ├── alembic.ini
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── tests/                # pytest unit + integration tests
@@ -125,7 +147,7 @@ requestFlow/
 ## Future Enhancements
 
 - Conversational agent for guided request submission via natural-language Q&A
-- Database migrations (Alembic) — tables are currently updated via manual `ALTER TABLE` statements rather than versioned migrations; this project surfaced a real schema-drift issue between the SQLAlchemy models and the deployed database, which motivates adopting proper migrations going forward
+- ~~Database migrations (Alembic)~~ — done. A real schema-drift incident (columns in `models.py` missing from production, caused by manual `ALTER TABLE` statements) motivated adopting Alembic; see [Database Migrations](#database-migrations)
 - Audit history table tracking full status-change history per request (currently only the terminal decision is recorded)
 - Auto-scaling / multi-AZ for the backend and database (currently single-instance, appropriate for a portfolio project but a documented gap versus production-grade HA)
 

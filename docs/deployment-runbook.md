@@ -14,9 +14,9 @@ enough to demo and to talk through in interviews.
 
 ## 0. Before you start
 
-- [ ] Create an AWS account if you don't have one (or use an existing one you're comfortable spending small amounts in)
-- [ ] **Set a billing alarm** in AWS Budgets (e.g. alert at $5) before creating anything — this is the single easiest way to avoid a surprise bill
-- [ ] Pick a region close to you (e.g. `us-east-1`) and stick with it for every resource below — cross-region resources can't talk to each other by default
+- [X] Create an AWS account if you don't have one (or use an existing one you're comfortable spending small amounts in)
+- [X] **Set a billing alarm** in AWS Budgets (e.g. alert at $5) before creating anything — this is the single easiest way to avoid a surprise bill
+- [X] Pick a region close to you (e.g. `us-east-1`) and stick with it for every resource below — cross-region resources can't talk to each other by default
 
 ## 1. IAM — don't use your root account day to day
 
