@@ -1,5 +1,9 @@
 # RequestFlow — Manual AWS Deploy Checklist
+# Deployment Runbook
 
+This is the step-by-step runbook I followed to deploy RequestFlow to AWS 
+from scratch — kept as documentation of the actual deployment process, 
+including the real infrastructure decisions made along the way.
 This is a walkthrough for deploying RequestFlow to AWS by hand through the
 Console, so you actually learn what each piece does. Nothing here is
 automated — you click through every step yourself.

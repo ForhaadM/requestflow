@@ -8,6 +8,8 @@ from models import User, Requests, Reviews
 from typing import Optional
 from enum import Enum
 from auth import hash_password, verify_password, create_access_token, get_current_user
+from request_service import create_request_for_user, get_request_for_user
+from chat import router as chat_router
 
 
 # Request types that represent an issue being fixed rather than something being
@@ -33,6 +35,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(chat_router)
 
 
 class UserPublic(BaseModel):
@@ -71,13 +75,7 @@ def my_requests(db: Session = Depends(get_db), current_user: User = Depends(get_
 
 @app.get("/requests/{request_id}")
 def get_request(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
-    if not existing_request:
-        raise HTTPException(status_code=404, detail="Request not found.")
-    if current_user.role == "admin" or current_user.user_id == existing_request.requester_reference:
-        return existing_request
-    else:
-        raise HTTPException(status_code=403, detail="Not Authorized to see request.")
+    return get_request_for_user(db, current_user, request_id)
 
 @app.get("/requests/{request_id}/reviews")
 def get_review(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -148,23 +146,14 @@ class StatusUpdate(BaseModel):
 
 @app.post("/requests")
 def create_request(request: RequestCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if not (request.description and request.description.strip()):
-        raise HTTPException(status_code=400, detail="A description is required.")
-
-    if request.priority == "P0" and not (request.urgency_justification and request.urgency_justification.strip()):
-        raise HTTPException(status_code=400, detail="A justification is required for Urgent priority requests.")
-
-    new_request = Requests(
-        requester_reference=current_user.user_id,
+    return create_request_for_user(
+        db,
+        current_user,
         request_type=request.request_type,
         description=request.description,
         priority=request.priority,
-        urgency_justification=request.urgency_justification
-    )
-    db.add(new_request)
-    db.commit()
-    db.refresh(new_request)
-    return new_request # not looping through and returning all the requests because we are creating one request and confirming it got created
+        urgency_justification=request.urgency_justification,
+    ) # not looping through and returning all the requests because we are creating one request and confirming it got created
 
 
 @app.patch("/requests/{request_id}/claim")

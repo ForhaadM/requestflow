@@ -6,6 +6,15 @@ from typing import Optional
 
 # User, Request, Review classes will go here
 
+# Single source of truth for the Requests CheckConstraints below — also used
+# by the chatbot (chatbot.py) so its tool schemas/system prompt can't drift
+# from what the database will actually accept.
+REQUEST_TYPES = (
+    "hardware", "software", "access-request", "account-password",
+    "bug-report", "network", "onboarding-offboarding", "facilities", "other",
+)
+PRIORITIES = ("P0", "P1", "P2", "P3")
+
 class User(Base):
     __tablename__ = "users"
 
@@ -34,10 +43,9 @@ class Requests(Base):
 
     __table_args__ = (
     CheckConstraint(
-        "request_type IN ('hardware', 'software', 'access-request', 'account-password', "
-        "'bug-report', 'network', 'onboarding-offboarding', 'facilities', 'other')"
+        "request_type IN (" + ", ".join(f"'{t}'" for t in REQUEST_TYPES) + ")"
     ),
-    CheckConstraint("priority IN ('P0', 'P1', 'P2', 'P3')"),
+    CheckConstraint("priority IN (" + ", ".join(f"'{p}'" for p in PRIORITIES) + ")"),
     CheckConstraint("status IN ('open', 'in-progress', 'resolved', 'closed', 'approved', 'rejected')"),
 )
 
