@@ -147,3 +147,69 @@ def test_chat_handles_api_error_mid_conversation_gracefully(client, auth_headers
     # the tool call itself had already succeeded before the second API call failed
     created = db_session.query(Requests).filter(Requests.description == "New monitor").first()
     assert created is not None
+
+
+def test_chat_create_request_blocks_on_duplicate_and_reports_it(client, auth_headers, db_session):
+    tool_call = _tool_use_response(
+        "create_request",
+        {"request_type": "hardware", "description": "Printer still not working", "priority": "P1"},
+    )
+    final = _text_response("This looks similar to request #47 ('printer not working'). Still want me to create it?")
+
+    fake_match = [
+        {
+            "request_id": 47,
+            "request_type": "hardware",
+            "description": "printer not working",
+            "priority": "P1",
+            "status": "open",
+            "created_at": "2026-07-08T00:00:00",
+            "confidence": "high",
+        }
+    ]
+
+    with patch.object(chatbot, "check_similar_requests", return_value=fake_match):
+        with patch.object(chatbot._client.messages, "create", side_effect=[tool_call, final]) as mock_create:
+            response = client.post(
+                "/chat",
+                json={"message": "The printer is still broken", "history": []},
+                headers=auth_headers,
+            )
+
+    assert response.status_code == 200
+    # not created — the tool returned a duplicate_warning instead
+    created = db_session.query(Requests).filter(Requests.description == "Printer still not working").first()
+    assert created is None
+
+    second_call_messages = mock_create.call_args_list[1].kwargs["messages"]
+    tool_result_content = second_call_messages[-1]["content"][0]
+    assert tool_result_content["is_error"] is False
+    assert "duplicate_warning" in tool_result_content["content"]
+    assert "47" in tool_result_content["content"]
+
+
+def test_chat_create_request_confirmed_duplicate_bypasses_check(client, auth_headers, db_session):
+    tool_call = _tool_use_response(
+        "create_request",
+        {
+            "request_type": "hardware",
+            "description": "Printer still not working",
+            "priority": "P1",
+            "confirmed_duplicate": True,
+        },
+    )
+    final = _text_response("Done — created a new request anyway.")
+
+    with patch.object(chatbot, "check_similar_requests") as mock_check:
+        with patch.object(chatbot._client.messages, "create", side_effect=[tool_call, final]):
+            response = client.post(
+                "/chat",
+                json={"message": "Yes, create it anyway", "history": []},
+                headers=auth_headers,
+            )
+
+    assert response.status_code == 200
+    mock_check.assert_not_called()
+
+    created = db_session.query(Requests).filter(Requests.description == "Printer still not working").first()
+    assert created is not None

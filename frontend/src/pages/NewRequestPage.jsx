@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { createRequest } from '../api/requests'
+import { createRequest, checkSimilarRequests } from '../api/requests'
 import { Alert } from '../components/Alert'
 import { CharCountTextarea } from '../components/CharCountTextarea'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { PageHeader } from '../components/PageHeader'
 import { PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
-import { REQUEST_TYPES } from '../lib/requestTypes'
+import { REQUEST_TYPES, requestTypeLabel } from '../lib/requestTypes'
+import { formatRelativeDays } from '../lib/formatDate'
 
 const DESCRIPTION_MAX = 500
 const JUSTIFICATION_MAX = 300
@@ -24,11 +25,34 @@ export function NewRequestPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false)
+  const [duplicates, setDuplicates] = useState([])
 
   const isUrgent = form.priority === 'P0'
 
   function update(field) {
-    return (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
+    return (e) => {
+      setDuplicates([])
+      setForm((f) => ({ ...f, [field]: e.target.value }))
+    }
+  }
+
+  async function submitRequest() {
+    setSubmitting(true)
+    try {
+      await createRequest(token, {
+        ...form,
+        urgency_justification: isUrgent ? form.urgency_justification : null,
+      })
+      setSuccess('Request submitted.')
+      setForm({ request_type: REQUEST_TYPES[0].value, description: '', priority: 'P1', urgency_justification: '' })
+      setDuplicates([])
+      setTimeout(() => navigate('/requests/mine'), 800)
+    } catch (err) {
+      setError(err.message || 'Failed to submit request')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   async function handleSubmit(e) {
@@ -46,20 +70,31 @@ export function NewRequestPage() {
       return
     }
 
-    setSubmitting(true)
+    setCheckingDuplicates(true)
+    let matches = []
     try {
-      await createRequest(token, {
-        ...form,
-        urgency_justification: isUrgent ? form.urgency_justification : null,
+      const result = await checkSimilarRequests(token, {
+        request_type: form.request_type,
+        description: form.description,
       })
-      setSuccess('Request submitted.')
-      setForm({ request_type: REQUEST_TYPES[0].value, description: '', priority: 'P1', urgency_justification: '' })
-      setTimeout(() => navigate('/requests/mine'), 800)
-    } catch (err) {
-      setError(err.message || 'Failed to submit request')
+      matches = result.matches
+    } catch {
+      // Fail open — if the duplicate check itself fails, don't block submission on it.
+      matches = []
     } finally {
-      setSubmitting(false)
+      setCheckingDuplicates(false)
     }
+
+    if (matches.length > 0) {
+      setDuplicates(matches)
+      return
+    }
+
+    await submitRequest()
+  }
+
+  function handleSubmitAnyway() {
+    submitRequest()
   }
 
   return (
@@ -139,13 +174,49 @@ export function NewRequestPage() {
         <Alert>{error}</Alert>
         <Alert type="success">{success}</Alert>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full cursor-pointer rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {submitting ? 'Submitting…' : 'Submit request'}
-        </button>
+        {duplicates.length > 0 && (
+          <div className="rounded-md bg-amber-50 p-3 ring-1 ring-inset ring-amber-200">
+            <p className="text-sm font-medium text-amber-800">
+              This looks similar to {duplicates.length === 1 ? 'a request' : 'requests'} you already have open:
+            </p>
+            <ul className="mt-2 space-y-1">
+              {duplicates.map((m) => (
+                <li key={m.request_id} className="text-sm text-amber-700">
+                  #{m.request_id} · {requestTypeLabel(m.request_type)} — "{m.description}", submitted{' '}
+                  {formatRelativeDays(m.created_at)}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleSubmitAnyway}
+                disabled={submitting}
+                className="cursor-pointer rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? 'Submitting…' : 'Submit anyway'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDuplicates([])}
+                disabled={submitting}
+                className="cursor-pointer rounded-md border border-amber-300 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Let me edit it
+              </button>
+            </div>
+          </div>
+        )}
+
+        {duplicates.length === 0 && (
+          <button
+            type="submit"
+            disabled={submitting || checkingDuplicates}
+            className="w-full cursor-pointer rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {checkingDuplicates ? 'Checking for duplicates…' : submitting ? 'Submitting…' : 'Submit request'}
+          </button>
+        )}
       </form>
     </div>
   )

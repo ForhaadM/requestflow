@@ -1,0 +1,144 @@
+from datetime import datetime, timedelta
+
+from models import Requests, Reviews
+import analytics
+
+
+def _backdate_request(db_session, request_id: int, created_at: datetime):
+    db_session.query(Requests).filter(Requests.request_id == request_id).update({"created_at": created_at})
+    db_session.commit()
+
+
+def _backdate_review(db_session, review_id: int, reviewed_at: datetime):
+    db_session.query(Reviews).filter(Reviews.review_id == review_id).update({"reviewed_at": reviewed_at})
+    db_session.commit()
+
+
+def _create_request(client, headers, request_type="hardware", description="desc"):
+    response = client.post("/requests", json={"request_type": request_type, "description": description}, headers=headers)
+    assert response.status_code == 200
+    return response.json()["request_id"]
+
+
+def test_admin_analytics_requires_admin(client, auth_headers):
+    response = client.get("/admin/analytics", headers=auth_headers)
+    assert response.status_code == 403
+
+
+def test_admin_analytics_allowed_for_admin_and_has_expected_shape(client, make_user):
+    admin = make_user(role="admin")
+    response = client.get("/admin/analytics", headers=admin["headers"])
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {
+        "volume_by_category",
+        "spikes",
+        "avg_resolution_by_category",
+        "avg_resolution_by_priority",
+    }
+    # every request_type should be represented even with zero data
+    assert len(body["volume_by_category"]) == 9
+    assert len(body["avg_resolution_by_category"]) == 9
+    assert len(body["avg_resolution_by_priority"]) == 4
+
+
+def test_volume_trend_up_when_recent_exceeds_previous(client, auth_headers, db_session):
+    now = datetime.utcnow()
+    # one request in the "previous" half of the 30-day window
+    old_id = _create_request(client, auth_headers, request_type="software", description="old one")
+    _backdate_request(db_session, old_id, now - timedelta(days=20))
+
+    # two requests in the "recent" half
+    for i in range(2):
+        rid = _create_request(client, auth_headers, request_type="software", description=f"recent {i}")
+        _backdate_request(db_session, rid, now - timedelta(days=5))
+
+    results = {r["request_type"]: r for r in analytics.get_volume_trends(db_session, now=now)}
+    software = results["software"]
+    assert software["previous_15d"] == 1
+    assert software["recent_15d"] == 2
+    assert software["trend"] == "up"
+
+
+def test_volume_trend_down_when_recent_below_previous(client, auth_headers, db_session):
+    now = datetime.utcnow()
+    for i in range(3):
+        rid = _create_request(client, auth_headers, request_type="network", description=f"old {i}")
+        _backdate_request(db_session, rid, now - timedelta(days=20))
+
+    rid = _create_request(client, auth_headers, request_type="network", description="recent")
+    _backdate_request(db_session, rid, now - timedelta(days=5))
+
+    results = {r["request_type"]: r for r in analytics.get_volume_trends(db_session, now=now)}
+    assert results["network"]["trend"] == "down"
+
+
+def test_volume_trend_excludes_requests_outside_30_day_window(client, auth_headers, db_session):
+    now = datetime.utcnow()
+    old_id = _create_request(client, auth_headers, request_type="facilities", description="ancient")
+    _backdate_request(db_session, old_id, now - timedelta(days=40))
+
+    results = {r["request_type"]: r for r in analytics.get_volume_trends(db_session, now=now)}
+    assert results["facilities"]["total_30d"] == 0
+
+
+def test_spike_detected_when_recent_volume_far_exceeds_baseline(client, auth_headers, db_session):
+    now = datetime.utcnow()
+    # light, steady baseline over the trailing 4 weeks (well before the last 7 days)
+    for i in range(2):
+        rid = _create_request(client, auth_headers, request_type="bug-report", description=f"baseline {i}")
+        _backdate_request(db_session, rid, now - timedelta(days=14 + i))
+
+    # sudden burst in the last 7 days
+    for i in range(6):
+        rid = _create_request(client, auth_headers, request_type="bug-report", description=f"burst {i}")
+        _backdate_request(db_session, rid, now - timedelta(days=1))
+
+    spikes = {s["request_type"]: s for s in analytics.get_spikes(db_session, now=now)}
+    assert "bug-report" in spikes
+    assert spikes["bug-report"]["recent_count"] == 6
+
+
+def test_spike_not_flagged_for_low_volume_category(client, auth_headers, db_session):
+    now = datetime.utcnow()
+    rid = _create_request(client, auth_headers, request_type="other", description="single request")
+    _backdate_request(db_session, rid, now - timedelta(days=1))
+
+    spikes = {s["request_type"] for s in analytics.get_spikes(db_session, now=now)}
+    # below SPIKE_MIN_COUNT, so it should never be flagged regardless of baseline
+    assert "other" not in spikes
+
+
+def test_avg_resolution_by_category_computes_days_between_creation_and_first_decision(
+    client, auth_headers, make_user, db_session
+):
+    request_id = _create_request(client, auth_headers, request_type="access-request", description="need access")
+    _backdate_request(db_session, request_id, datetime.utcnow() - timedelta(days=5))
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    review_response = client.post(
+        "/reviews",
+        json={"request_reference": request_id, "decision": "APPROVED", "comment_text": "granted"},
+        headers=reviewer["headers"],
+    )
+    review_id = review_response.json()["review_id"]
+    _backdate_review(db_session, review_id, datetime.utcnow() - timedelta(days=2))
+
+    results = {r["request_type"]: r for r in analytics.get_avg_resolution_by_category(db_session)}
+    assert results["access-request"]["resolved_count"] == 1
+    # created 5 days ago, decided 2 days ago -> ~3 days to resolve
+    assert 2.9 <= results["access-request"]["avg_days"] <= 3.1
+
+
+def test_avg_resolution_ignores_unresolved_requests(client, auth_headers, db_session):
+    _create_request(client, auth_headers, request_type="onboarding-offboarding", description="still open")
+
+    results = {r["request_type"]: r for r in analytics.get_avg_resolution_by_category(db_session)}
+    assert results["onboarding-offboarding"]["resolved_count"] == 0
+    assert results["onboarding-offboarding"]["avg_days"] == 0
+
+
+def test_avg_resolution_by_priority_reports_all_priorities(client, auth_headers, db_session):
+    results = {r["priority"]: r for r in analytics.get_avg_resolution_by_priority(db_session)}
+    assert set(results.keys()) == {"P0", "P1", "P2", "P3"}

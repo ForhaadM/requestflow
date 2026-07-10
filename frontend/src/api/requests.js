@@ -17,6 +17,14 @@ export function createRequest(token, { request_type, description, priority, urge
   })
 }
 
+export function checkSimilarRequests(token, { request_type, description }) {
+  return apiFetch('/requests/check-similar', {
+    method: 'POST',
+    token,
+    body: { request_type, description },
+  })
+}
+
 export function claimRequest(token, requestId) {
   return apiFetch(`/requests/${requestId}/claim`, { method: 'PATCH', token })
 }

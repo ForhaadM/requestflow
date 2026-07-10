@@ -10,6 +10,8 @@ from enum import Enum
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from request_service import create_request_for_user, get_request_for_user
 from chat import router as chat_router
+from duplicate_detection import check_similar_requests
+from analytics import get_admin_analytics
 
 
 # Request types that represent an issue being fixed rather than something being
@@ -113,6 +115,10 @@ class RequestCreate(BaseModel):
     priority: PriorityEnum = PriorityEnum.p1
     urgency_justification: str | None = Field(default=None, max_length=300)
 
+class SimilarityCheckRequest(BaseModel):
+    request_type: RequestTypeEnum
+    description: str
+
 class ReviewCreate(BaseModel):
     request_reference: int
     decision: DecisionEnum
@@ -154,6 +160,12 @@ def create_request(request: RequestCreate, db: Session = Depends(get_db), curren
         priority=request.priority,
         urgency_justification=request.urgency_justification,
     ) # not looping through and returning all the requests because we are creating one request and confirming it got created
+
+
+@app.post("/requests/check-similar")
+def check_similar(payload: SimilarityCheckRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    matches = check_similar_requests(db, current_user, payload.request_type, payload.description)
+    return {"matches": matches}
 
 
 @app.patch("/requests/{request_id}/claim")
@@ -289,3 +301,9 @@ def update_request_status(request_id: int, status_update: StatusUpdate, db: Sess
     db.commit()
     db.refresh(existing_request)
     return existing_request
+
+@app.get("/admin/analytics")
+def admin_analytics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can view analytics.")
+    return get_admin_analytics(db)

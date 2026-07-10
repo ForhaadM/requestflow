@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from models import User, Requests, REQUEST_TYPES, PRIORITIES
 from request_service import create_request_for_user, get_request_for_user
+from duplicate_detection import check_similar_requests
 
 load_dotenv()
 
@@ -30,7 +31,12 @@ SYSTEM_PROMPT = (
     "How urgent is this?\n1. Low\n2. Medium\n3. High\n4. Urgent (requires a justification)\n\n"
     "If they pick option 4 / Urgent (priority Urgent = P0), you must also collect a short "
     "justification before calling create_request. For Low/Medium/High, no justification is needed. "
-    "Don't ask for information you can reasonably infer. Keep replies short and conversational."
+    "Don't ask for information you can reasonably infer. Keep replies short and conversational.\n\n"
+    "create_request automatically checks for likely duplicates among the user's own open requests. "
+    "If it returns duplicate_warning instead of created, do NOT call create_request again yet — tell "
+    "the user which existing request(s) it resembles (id and description) and ask if they still want "
+    "to create a new one. Only if they confirm, call create_request again with the same arguments plus "
+    "confirmed_duplicate set to true."
 )
 
 TOOLS = [
@@ -51,6 +57,12 @@ TOOLS = [
                 "urgency_justification": {
                     "type": "string",
                     "description": "Required if priority is P0 (Urgent).",
+                },
+                "confirmed_duplicate": {
+                    "type": "boolean",
+                    "description": "Set true only after the user has confirmed they still want to "
+                    "create this request despite a previously reported duplicate_warning.",
+                    "default": False,
                 },
             },
             "required": ["request_type", "description"],
@@ -104,12 +116,19 @@ def _run_tool(name: str, tool_input: dict, db: Session, current_user: User) -> d
         priority = tool_input.get("priority", "P1")
         if priority not in PRIORITIES:
             return {"error": f"'{priority}' is not a valid priority."}
+
+        description = tool_input.get("description")
+        if not tool_input.get("confirmed_duplicate"):
+            matches = check_similar_requests(db, current_user, request_type, description)
+            if matches:
+                return {"duplicate_warning": {"matches": matches}}
+
         try:
             new_request = create_request_for_user(
                 db,
                 current_user,
                 request_type=request_type,
-                description=tool_input.get("description"),
+                description=description,
                 priority=priority,
                 urgency_justification=tool_input.get("urgency_justification"),
             )

@@ -17,3 +17,13 @@ export function formatDate(value) {
     timeZone: TIME_ZONE,
   })
 }
+
+// Coarse "how long ago" for surfacing in duplicate-request warnings, e.g.
+// "submitted 2 days ago" — doesn't need to be precise to the minute.
+export function formatRelativeDays(value) {
+  if (!value) return ''
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / (1000 * 60 * 60 * 24))
+  if (days <= 0) return 'today'
+  if (days === 1) return '1 day ago'
+  return `${days} days ago`
+}

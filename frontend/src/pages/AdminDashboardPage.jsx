@@ -9,6 +9,7 @@ import { Alert } from '../components/Alert'
 import { PageHeader } from '../components/PageHeader'
 import { FilterDropdown } from '../components/FilterDropdown'
 import { BarChart } from '../components/BarChart'
+import { AdminAnalyticsSection } from '../components/AdminAnalyticsSection'
 import { formatDateTime } from '../lib/formatDate'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor } from '../lib/requestTypes'
 
@@ -205,6 +206,8 @@ export function AdminDashboardPage() {
           </div>
         </section>
       </div>
+
+      <AdminAnalyticsSection token={token} />
 
       <section>
         <div className="flex items-center justify-between">
