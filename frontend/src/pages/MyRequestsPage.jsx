@@ -1,10 +1,13 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getMyRequests, getRequestReviews } from '../api/requests'
 import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
+import { PageHeader } from '../components/PageHeader'
+import { StatTile } from '../components/StatTile'
+import { EmptyState } from '../components/EmptyState'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
 
@@ -59,27 +62,44 @@ export function MyRequestsPage() {
     }
   }
 
+  const statusCounts = useMemo(() => {
+    const counts = { open: 0, 'in-progress': 0, approved: 0, rejected: 0 }
+    for (const r of requests) {
+      if (r.status in counts) counts[r.status] += 1
+    }
+    return counts
+  }, [requests])
+
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-slate-900">My requests</h1>
+      <PageHeader title="My requests" subtitle="Everything you've submitted, in one place." />
 
       <div className="mt-6">
         <Alert>{error}</Alert>
         {loading ? (
           <Spinner />
         ) : requests.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-            <p className="text-sm text-slate-500">You haven't submitted any requests yet.</p>
-            <Link
-              to="/requests/new"
-              className="mt-4 inline-block rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              Create a New Request
-            </Link>
-          </div>
+          <EmptyState
+            title="You haven't submitted any requests yet."
+            action={
+              <Link
+                to="/requests/new"
+                className="inline-block rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                Create a New Request
+              </Link>
+            }
+          />
         ) : (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-left text-sm">
+          <>
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatTile label="Open" value={statusCounts.open} accent="text-blue-600" />
+              <StatTile label="In Review" value={statusCounts['in-progress']} accent="text-amber-600" />
+              <StatTile label="Approved" value={statusCounts.approved} accent="text-emerald-600" />
+              <StatTile label="Rejected" value={statusCounts.rejected} accent="text-red-600" />
+            </div>
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">ID</th>
@@ -152,7 +172,8 @@ export function MyRequestsPage() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>

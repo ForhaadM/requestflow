@@ -4,7 +4,7 @@ import { ChatWidget } from './ChatWidget'
 
 export function Layout() {
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-gradient-to-b from-indigo-50/60 via-slate-50 to-slate-50">
       <NavBar />
       <main className="mx-auto max-w-6xl px-6 py-8">
         <Outlet />

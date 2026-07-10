@@ -8,7 +8,7 @@ export function ClaimToggle({ claimed, claimantName, canToggle, submitting, onTo
         aria-pressed={claimed}
         title={canToggle ? (claimed ? 'Unclaim this request' : 'Claim this request') : undefined}
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${
-          claimed ? 'bg-slate-900' : 'bg-slate-300'
+          claimed ? 'bg-indigo-600' : 'bg-slate-300'
         } ${canToggle ? 'cursor-pointer' : 'cursor-default opacity-70'} disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <span

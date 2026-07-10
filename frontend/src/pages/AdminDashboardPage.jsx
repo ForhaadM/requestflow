@@ -6,6 +6,7 @@ import { getUsers } from '../api/auth'
 import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
+import { PageHeader } from '../components/PageHeader'
 import { FilterDropdown } from '../components/FilterDropdown'
 import { BarChart } from '../components/BarChart'
 import { formatDateTime } from '../lib/formatDate'
@@ -26,7 +27,7 @@ const STATUS_LABELS = { open: 'Open', 'in-progress': 'In Review', approved: 'App
 
 // Single hue for every bar: type is nominal (position + label already carry
 // identity), so color doesn't need to distinguish categories here.
-const TYPE_BAR_COLOR = '#2a78d6'
+const TYPE_BAR_COLOR = '#4f46e5'
 
 function tally(items, key) {
   return items.reduce((acc, item) => {
@@ -83,7 +84,7 @@ function OverrideRow({ request, token, onOverridden, onCancel }) {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             autoFocus
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <Alert>{error}</Alert>
           <div className="mt-2 flex gap-2">
@@ -157,16 +158,16 @@ export function AdminDashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Admin dashboard</h1>
-          <p className="mt-1 text-sm text-slate-500">All requests and reviews in the system.</p>
-        </div>
-        <div className="text-right">
-          <p className="text-5xl font-semibold tabular-nums text-slate-900">{requests.length}</p>
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">Total requests</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Admin dashboard"
+        subtitle="All requests and reviews in the system."
+        action={
+          <div className="text-right">
+            <p className="text-5xl font-semibold tabular-nums text-white">{requests.length}</p>
+            <p className="mt-1 text-xs font-medium uppercase tracking-wide text-indigo-100">Total requests</p>
+          </div>
+        }
+      />
 
       <Alert>{error}</Alert>
 
@@ -253,7 +254,7 @@ export function AdminDashboardPage() {
                       {(r.status === 'rejected' || r.status === 'approved') && (
                         <button
                           onClick={() => setOverridingId(overridingId === r.request_id ? null : r.request_id)}
-                          className="cursor-pointer text-sm font-medium text-blue-600 hover:underline"
+                          className="cursor-pointer text-sm font-medium text-indigo-600 hover:underline"
                         >
                           {r.status === 'rejected' ? 'Override rejection' : 'Reverse decision'}
                         </button>

@@ -7,6 +7,8 @@ import { DecisionBadge } from '../components/Badge'
 import { FilterDropdown } from '../components/FilterDropdown'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
 
@@ -53,23 +55,21 @@ export function CompletedReviewsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Completed reviews</h1>
-          <p className="mt-1 text-sm text-slate-500">Decisions you've made on requests.</p>
-        </div>
-        <div className="text-right">
-          <FilterDropdown label="Decision" value={filter} options={FILTER_OPTIONS} onChange={setFilter} />
-          <p className="mt-1 text-xs text-slate-400">Covers Resolved/Declined outcomes too</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Completed reviews"
+        subtitle="Decisions you've made on requests."
+        action={
+          <div className="text-right">
+            <FilterDropdown label="Decision" value={filter} options={FILTER_OPTIONS} onChange={setFilter} />
+            <p className="mt-1 text-xs text-indigo-100">Covers Resolved/Declined outcomes too</p>
+          </div>
+        }
+      />
 
       <div className="mt-6">
         <Alert>{error}</Alert>
         {visibleReviews.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-            No completed reviews yet.
-          </p>
+          <EmptyState title="No completed reviews yet." />
         ) : (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-left text-sm">

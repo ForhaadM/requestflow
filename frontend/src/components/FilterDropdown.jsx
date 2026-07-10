@@ -42,7 +42,7 @@ export function FilterDropdown({ label = 'Status', value, options, onChange }) {
                 setOpen(false)
               }}
               className={`block w-full cursor-pointer px-3 py-1.5 text-left text-xs font-medium capitalize transition-colors ${
-                value === opt ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                value === opt ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               {opt}

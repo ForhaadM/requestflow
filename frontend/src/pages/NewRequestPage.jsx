@@ -5,6 +5,7 @@ import { createRequest } from '../api/requests'
 import { Alert } from '../components/Alert'
 import { CharCountTextarea } from '../components/CharCountTextarea'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageHeader } from '../components/PageHeader'
 import { PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
 import { REQUEST_TYPES } from '../lib/requestTypes'
 
@@ -63,8 +64,7 @@ export function NewRequestPage() {
 
   return (
     <div className="mx-auto max-w-xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Create a New Request</h1>
-      <p className="mt-1 text-sm text-slate-500">Fill out the details below.</p>
+      <PageHeader title="Create a New Request" subtitle="Fill out the details below." />
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
@@ -78,7 +78,7 @@ export function NewRequestPage() {
           <select
             value={form.request_type}
             onChange={update('request_type')}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
             {REQUEST_TYPES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -91,7 +91,7 @@ export function NewRequestPage() {
           <select
             value={form.priority}
             onChange={update('priority')}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
             {PRIORITY_ORDER.map((p) => (
               <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
@@ -142,7 +142,7 @@ export function NewRequestPage() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full cursor-pointer rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full cursor-pointer rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? 'Submitting…' : 'Submit request'}
         </button>

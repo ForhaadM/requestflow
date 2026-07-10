@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getAllRequests, claimRequest, unclaimRequest } from '../api/requests'
 import { createReview } from '../api/reviews'
@@ -8,6 +8,9 @@ import { ClaimToggle } from '../components/ClaimToggle'
 import { FadeSlide } from '../components/FadeSlide'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
+import { PageHeader } from '../components/PageHeader'
+import { StatTile } from '../components/StatTile'
+import { EmptyState } from '../components/EmptyState'
 import { priorityRank } from '../lib/priority'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel, decisionVerbsFor, requiresResolutionNotes } from '../lib/requestTypes'
@@ -111,7 +114,7 @@ function DecisionForm({ request, token, onReviewed }) {
             onChange={(e) => setComment(e.target.value)}
             placeholder={notesPlaceholder}
             autoFocus
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
 
           <Alert>{error}</Alert>
@@ -120,7 +123,7 @@ function DecisionForm({ request, token, onReviewed }) {
             <button
               onClick={() => submitDecision(pendingDecision, comment)}
               disabled={!!submitting}
-              className="cursor-pointer rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? 'Submitting…' : 'Submit'}
             </button>
@@ -264,19 +267,34 @@ export function ReviewQueuePage() {
     .filter((r) => r.status === 'open' || r.status === 'in-progress')
     .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
 
+  const openCount = useMemo(() => requests.filter((r) => r.status === 'open').length, [requests])
+  const inProgressCount = useMemo(() => requests.filter((r) => r.status === 'in-progress').length, [requests])
+  const mineCount = useMemo(
+    () => requests.filter((r) => r.status === 'in-progress' && r.claimed_by === user.user_id).length,
+    [requests, user.user_id]
+  )
+
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-slate-900">Review queue</h1>
-      <p className="mt-1 text-sm text-slate-500">Claim a request to review it — only the claimant (or an admin) can approve or reject it.</p>
+      <PageHeader
+        title="Review queue"
+        subtitle="Claim a request to review it — only the claimant (or an admin) can approve or reject it."
+      />
+
+      {!loading && requests.length > 0 && (
+        <div className="mt-6 grid grid-cols-3 gap-3">
+          <StatTile label="Unclaimed" value={openCount} accent="text-blue-600" />
+          <StatTile label="In Review" value={inProgressCount} accent="text-amber-600" />
+          <StatTile label="Claimed by you" value={mineCount} accent="text-indigo-600" />
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         <Alert>{error}</Alert>
         {loading ? (
           <Spinner />
         ) : queue.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-            Nothing waiting for review right now.
-          </p>
+          <EmptyState title="Nothing waiting for review right now." />
         ) : (
           queue.map((r) => (
             <QueueRow
