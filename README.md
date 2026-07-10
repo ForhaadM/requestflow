@@ -34,6 +34,8 @@ This project was built to demonstrate both software engineering skills (schema d
 ## Data Model / Architecture
 
 Three core entities: `users`, `requests`, and `reviews`.
+
+
 users                      requests                    reviews
 ─────                      ────────                    ───────
 user_id (PK)         ┌───▶ request_id (PK)        ┌───▶ review_id (PK)
