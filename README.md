@@ -3,15 +3,18 @@
 
 A full-stack internal request management system for tracking approvals, reviews, and SLAs.
 
+**Live site:** https://requestflow-app.com
+**Backend API:** https://api.requestflow-app.com
+
 ## Overview / Problem Statement
 
-Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow, a conditional business rule requiring justification on rejected requests, and a full audit trail of who reviewed what and when.
+Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow, including a conditional business rule requiring justification on rejected requests, and a full audit trail of who reviewed what and when.
 
 This project was built to demonstrate both software engineering skills (schema design, REST API development, authentication, containerization, cloud deployment) and business analysis skills (requirements modeling, workflow design, deliberate scoping decisions) relevant to both SWE and BA roles.
 
 ## Features
 
-- **Request submission** — requesters submit categorized requests (access, hardware, software, bug report) with a priority level
+- **Request submission** — requesters submit categorized requests (access, hardware, software, bug report, and more) with a priority level
 - **Review workflow** — reviewers approve or reject requests; rejections require a written justification, enforced at the application layer
 - **Role-based access** — requester, reviewer, and admin roles with distinct permissions
 - **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input
@@ -26,7 +29,7 @@ This project was built to demonstrate both software engineering skills (schema d
 - **Auth:** JWT (python-jose), bcrypt (passlib)
 - **Testing:** pytest, FastAPI TestClient
 - **Infra:** Docker, Docker Compose, GitHub Actions (CI/CD)
-- **Cloud:** AWS (RDS, EC2, S3, CloudFront, Route 53)
+- **Cloud:** AWS (RDS, EC2, Application Load Balancer, S3, CloudFront, Route 53, ACM)
 
 ## Data Model / Architecture
 
@@ -38,7 +41,9 @@ name                 │     requester_reference (FK)│     request_reference (
 email (unique)       │     request_type            │     reviewer_reference (FK)
 password (hashed)    │     description             │     decision
 role                 │     priority                │     comment_text
-│     status                  │     reviewed_at
+│     urgency_justification    │     reviewed_at
+│     status                  │
+│     claimed_by (FK)          │
 │     created_at               │
 └──────────────────────────────┘
 
@@ -50,19 +55,18 @@ role                 │     priority                │     comment_text
 
 ## Live Deployment
 
-RequestFlow is deployed on AWS:
+RequestFlow is fully deployed on AWS with a custom domain and end-to-end HTTPS:
 
-- **Frontend:** React (Vite) build hosted on S3, served via CloudFront (CDN + HTTPS)
-- **Backend:** FastAPI running in a Docker container on an EC2 instance
-- **Database:** Managed PostgreSQL via Amazon RDS
-- **Domain:** registered via Route 53 (HTTPS/ALB wiring for the backend in progress)
-
-> **Deployment status:** The frontend and backend are both independently live and verified working. HTTPS for the backend (via an Application Load Balancer + ACM certificate) is the next milestone — currently the backend serves plain HTTP, which browsers block from an HTTPS frontend (mixed content policy). This is a known, documented next step, not an oversight.
+- **Frontend:** React (Vite) build hosted on S3, served via CloudFront (CDN + HTTPS), on `requestflow-app.com`
+- **Backend:** FastAPI running in a Docker container on an EC2 instance, behind an Application Load Balancer terminating HTTPS on `api.requestflow-app.com`
+- **Database:** Managed PostgreSQL via Amazon RDS, reachable only from the EC2 instance
+- **Domain & certificates:** registered via Route 53; free TLS certificate issued and validated through AWS Certificate Manager
 
 **Infrastructure decisions:**
 - **RDS over self-managed Postgres** — managed backups, patching, and monitoring without operational overhead
 - **EC2 + Docker over a managed container service** — chosen deliberately to build hands-on familiarity with core EC2 networking, security groups, and manual container deployment
-- **Security groups scoped per-resource** — RDS only accepts connections from the EC2 instance's security group (not the public internet), SSH access to EC2 is restricted to a known IP, and only the API port is open publicly
+- **Application Load Balancer for HTTPS termination** — rather than running TLS directly on the app or the EC2 instance, the ALB handles certificate management and HTTPS termination, forwarding plain HTTP internally to the container — the standard pattern for this kind of setup
+- **Security groups scoped per-resource, least-privilege** — RDS only accepts connections from the EC2 instance's security group, EC2's application port only accepts connections from the ALB's security group (not the public internet directly), SSH access to EC2 is restricted to a known IP, and only the ALB's HTTPS port is open publicly
 - **Environment-variable-driven configuration throughout** — no hardcoded credentials or hosts anywhere in the codebase; local development and production deployment run the same code with different `.env` files
 
 ## Getting Started (local development)
@@ -115,10 +119,10 @@ requestFlow/
 
 ## Future Enhancements
 
-- HTTPS for the backend via ALB + ACM (in progress)
 - Conversational agent for guided request submission via natural-language Q&A
-- Database migrations (Alembic) — tables are currently created via a one-time manual step rather than versioned migrations
+- Database migrations (Alembic) — tables are currently updated via manual `ALTER TABLE` statements rather than versioned migrations; this project surfaced a real schema-drift issue between the SQLAlchemy models and the deployed database, which motivates adopting proper migrations going forward
 - Audit history table tracking full status-change history per request (currently only the terminal decision is recorded)
+- Auto-scaling / multi-AZ for the backend and database (currently single-instance, appropriate for a portfolio project but a documented gap versus production-grade HA)
 
 ## Author / Contact
 
