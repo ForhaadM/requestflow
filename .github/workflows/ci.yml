@@ -49,6 +49,14 @@ jobs:
         run: pip install -r requirements.txt
         working-directory: backend
 
+      - name: Apply DB migrations
+        run: alembic upgrade head
+        working-directory: backend
+
+      - name: Check models.py matches the migration history (fails on schema drift)
+        run: alembic check
+        working-directory: backend
+
       - name: Run pytest suite
         run: pytest -v
         working-directory: backend
@@ -74,6 +82,10 @@ jobs:
 
       - name: Lint
         run: npm run lint
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm test
         working-directory: frontend
 
       - name: Build

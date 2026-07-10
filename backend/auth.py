@@ -4,22 +4,31 @@ from database import get_db
 from models import User
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from datetime import timedelta
 from jose import jwt, JWTError
 from dotenv import load_dotenv
+from timeutils import utcnow
 import os
 
 load_dotenv()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # Fail fast at import time (app boot) instead of on the first login
+    # attempt, where a None SECRET_KEY produces a confusing jose error deep
+    # inside jwt.encode.
+    raise RuntimeError(
+        "SECRET_KEY environment variable is not set. Set it in your .env "
+        "(see .env.example) before starting the app."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes = ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = utcnow() + timedelta(minutes = ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm = ALGORITHM)
 

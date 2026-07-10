@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -190,7 +191,7 @@ def run_chat(message: str, history: list[dict], db: Session, current_user: User)
                 {
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": str(result),
+                    "content": json.dumps(result),
                     "is_error": "error" in result,
                 }
             )

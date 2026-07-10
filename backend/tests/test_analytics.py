@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from models import Requests, Reviews
+from timeutils import utcnow
 import analytics
 
 
@@ -43,7 +44,7 @@ def test_admin_analytics_allowed_for_admin_and_has_expected_shape(client, make_u
 
 
 def test_volume_trend_up_when_recent_exceeds_previous(client, auth_headers, db_session):
-    now = datetime.utcnow()
+    now = utcnow()
     # one request in the "previous" half of the 30-day window
     old_id = _create_request(client, auth_headers, request_type="software", description="old one")
     _backdate_request(db_session, old_id, now - timedelta(days=20))
@@ -61,7 +62,7 @@ def test_volume_trend_up_when_recent_exceeds_previous(client, auth_headers, db_s
 
 
 def test_volume_trend_down_when_recent_below_previous(client, auth_headers, db_session):
-    now = datetime.utcnow()
+    now = utcnow()
     for i in range(3):
         rid = _create_request(client, auth_headers, request_type="network", description=f"old {i}")
         _backdate_request(db_session, rid, now - timedelta(days=20))
@@ -74,7 +75,7 @@ def test_volume_trend_down_when_recent_below_previous(client, auth_headers, db_s
 
 
 def test_volume_trend_excludes_requests_outside_30_day_window(client, auth_headers, db_session):
-    now = datetime.utcnow()
+    now = utcnow()
     old_id = _create_request(client, auth_headers, request_type="facilities", description="ancient")
     _backdate_request(db_session, old_id, now - timedelta(days=40))
 
@@ -83,7 +84,7 @@ def test_volume_trend_excludes_requests_outside_30_day_window(client, auth_heade
 
 
 def test_spike_detected_when_recent_volume_far_exceeds_baseline(client, auth_headers, db_session):
-    now = datetime.utcnow()
+    now = utcnow()
     # light, steady baseline over the trailing 4 weeks (well before the last 7 days)
     for i in range(2):
         rid = _create_request(client, auth_headers, request_type="bug-report", description=f"baseline {i}")
@@ -100,7 +101,7 @@ def test_spike_detected_when_recent_volume_far_exceeds_baseline(client, auth_hea
 
 
 def test_spike_not_flagged_for_low_volume_category(client, auth_headers, db_session):
-    now = datetime.utcnow()
+    now = utcnow()
     rid = _create_request(client, auth_headers, request_type="other", description="single request")
     _backdate_request(db_session, rid, now - timedelta(days=1))
 
@@ -113,7 +114,7 @@ def test_avg_resolution_by_category_computes_days_between_creation_and_first_dec
     client, auth_headers, make_user, db_session
 ):
     request_id = _create_request(client, auth_headers, request_type="access-request", description="need access")
-    _backdate_request(db_session, request_id, datetime.utcnow() - timedelta(days=5))
+    _backdate_request(db_session, request_id, utcnow() - timedelta(days=5))
 
     reviewer = make_user(role="reviewer")
     client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
@@ -123,7 +124,7 @@ def test_avg_resolution_by_category_computes_days_between_creation_and_first_dec
         headers=reviewer["headers"],
     )
     review_id = review_response.json()["review_id"]
-    _backdate_review(db_session, review_id, datetime.utcnow() - timedelta(days=2))
+    _backdate_review(db_session, review_id, utcnow() - timedelta(days=2))
 
     results = {r["request_type"]: r for r in analytics.get_avg_resolution_by_category(db_session)}
     assert results["access-request"]["resolved_count"] == 1

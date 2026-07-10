@@ -75,3 +75,57 @@ def test_get_request_reviews_allowed_for_admin(client, auth_headers, make_user):
     response = client.get(f"/requests/{request_id}/reviews", headers=admin["headers"])
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+def test_get_request_reviews_allowed_for_claimant_reviewer(client, auth_headers, make_user):
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+
+    # Claimed but not yet reviewed — the claimant should still be able to see
+    # (empty) review history for their own claim.
+    response = client.get(f"/requests/{request_id}/reviews", headers=reviewer["headers"])
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_request_reviews_allowed_for_reviewer_who_reviewed_it(client, auth_headers, make_user):
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    # Even after an admin overrides the decision (claimed_by no longer
+    # matters), the reviewer who actually wrote a review should still be
+    # able to see it.
+    admin = make_user(role="admin")
+    client.post(
+        "/reviews",
+        json={"request_reference": request_id, "decision": "NOT APPROVED", "comment_text": "reversing"},
+        headers=admin["headers"],
+    )
+
+    response = client.get(f"/requests/{request_id}/reviews", headers=reviewer["headers"])
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_get_request_reviews_forbidden_for_uninvolved_reviewer(client, auth_headers, make_user):
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    other_reviewer = make_user(role="reviewer")
+    response = client.get(f"/requests/{request_id}/reviews", headers=other_reviewer["headers"])
+    assert response.status_code == 403

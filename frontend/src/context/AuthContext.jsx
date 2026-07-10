@@ -1,25 +1,10 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { login as apiLogin, getUsers } from '../api/auth'
+import { login as apiLogin, getCurrentUser } from '../api/auth'
 
 const AuthContext = createContext(null)
 
 const TOKEN_KEY = 'requestflow_token'
-
-// JWTs are only base64url-encoded, not encrypted, so decoding the payload
-// client-side to read `sub` (the user id) is safe — it reveals nothing the
-// server doesn't already hand back, and every real permission check still
-// happens server-side on each request.
-function decodeUserId(token) {
-  try {
-    const payload = token.split('.')[1]
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
-    const { sub } = JSON.parse(json)
-    return Number(sub)
-  } catch {
-    return null
-  }
-}
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
@@ -34,12 +19,9 @@ export function AuthProvider({ children }) {
       setLoading(false)
       return
     }
-    const userId = decodeUserId(tok)
     try {
-      const users = await getUsers()
-      const match = users.find((u) => u.user_id === userId)
-      if (!match) throw new Error('User not found')
-      setUser({ user_id: match.user_id, name: match.name, email: match.email, role: match.role })
+      const profile = await getCurrentUser(tok)
+      setUser({ user_id: profile.user_id, name: profile.name, email: profile.email, role: profile.role })
     } catch {
       // Token is invalid/expired or the backend is unreachable — treat as logged out.
       localStorage.removeItem(TOKEN_KEY)

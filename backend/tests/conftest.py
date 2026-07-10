@@ -5,8 +5,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+import rate_limit
 from database import Base, get_db
 from main import app
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Rate-limit state is a module-level, in-memory dict (see rate_limit.py)
+    so it persists across the whole pytest session unless cleared — without
+    this, fixtures like `make_user` that log in repeatedly would trip the
+    login rate limit partway through the suite. Mirrors the per-test DB
+    isolation `db_session` already provides."""
+    rate_limit._hits.clear()
+    yield
 
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")

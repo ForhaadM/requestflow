@@ -93,3 +93,25 @@ def test_patch_status_success_for_reviewer(client, auth_headers, make_user):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "closed"
+
+
+def test_patch_status_forbidden_once_decided(client, auth_headers, make_user):
+    # PATCH /requests/{id}/status must not be usable to silently reopen a
+    # decided request — that would bypass POST /reviews' admin-only,
+    # comment-required override protection entirely.
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    response = client.patch(
+        f"/requests/{request_id}/status", json={"status": "open"}, headers=reviewer["headers"]
+    )
+    assert response.status_code == 400
+
+    check = client.get(f"/requests/{request_id}", headers=auth_headers)
+    assert check.json()["status"] == "approved"

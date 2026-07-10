@@ -3,7 +3,7 @@ anthropic==0.116.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.14.1
-bcrypt==4.0.1
+bcrypt==4.0.1  # pinned: passlib 1.7.4's bcrypt backend probes a __about__.__version__ attribute that bcrypt>=4.1 removed, so newer bcrypt logs a spurious warning/breaks hashing under passlib's CryptContext
 click==8.4.2
 fastapi==0.139.0
 h11==0.16.0

@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import { getAllRequests } from '../api/requests'
 import { getReviews, createReview } from '../api/reviews'
-import { getUsers } from '../api/auth'
 import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
@@ -112,28 +112,23 @@ function OverrideRow({ request, token, onOverridden, onCancel }) {
 
 export function AdminDashboardPage() {
   const { token } = useAuth()
+  const { nameFor } = useUsers()
   const [requests, setRequests] = useState([])
   const [reviews, setReviews] = useState([])
-  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [overridingId, setOverridingId] = useState(null)
 
   useEffect(() => {
-    Promise.all([getAllRequests(token), getReviews(token), getUsers()])
-      .then(([r, rv, u]) => {
+    Promise.all([getAllRequests(token), getReviews(token)])
+      .then(([r, rv]) => {
         setRequests(r)
         setReviews(rv)
-        setUsers(u)
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [token])
-
-  function nameFor(userId) {
-    return users.find((u) => u.user_id === userId)?.name || `user #${userId}`
-  }
 
   function requestTypeFor(requestId) {
     return requests.find((r) => r.request_id === requestId)?.request_type

@@ -1,23 +1,30 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
 from models import User
 from chatbot import run_chat
+from rate_limit import enforce_rate_limit
 
 router = APIRouter()
+
+# Bounds cost/abuse — the client resends the full history on every turn, so
+# an unbounded message/history size is a per-request Anthropic API cost the
+# client fully controls.
+MAX_MESSAGE_LENGTH = 2000
+MAX_HISTORY_TURNS = 40
 
 
 class ChatMessage(BaseModel):
     role: str  # "user" or "assistant"
-    content: str
+    content: str = Field(max_length=MAX_MESSAGE_LENGTH)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = []
+    message: str = Field(max_length=MAX_MESSAGE_LENGTH)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
 class ChatResponse(BaseModel):
@@ -31,6 +38,7 @@ def chat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    enforce_rate_limit(f"chat:{current_user.user_id}", max_requests=20, window_seconds=60)
     reply = run_chat(
         request.message,
         [h.model_dump() for h in request.history],

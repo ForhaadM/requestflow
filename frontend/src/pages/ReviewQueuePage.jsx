@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import { getAllRequests, claimRequest, unclaimRequest } from '../api/requests'
 import { createReview } from '../api/reviews'
-import { getUsers } from '../api/auth'
 import { PriorityBadge } from '../components/Badge'
 import { ClaimToggle } from '../components/ClaimToggle'
 import { FadeSlide } from '../components/FadeSlide'
@@ -223,8 +223,8 @@ function QueueRow({ request, requesterName, claimantName, currentUser, token, ex
 
 export function ReviewQueuePage() {
   const { token, user } = useAuth()
+  const { nameFor } = useUsers()
   const [requests, setRequests] = useState([])
-  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState(null)
@@ -233,9 +233,8 @@ export function ReviewQueuePage() {
     setLoading(true)
     setError('')
     try {
-      const [allRequests, allUsers] = await Promise.all([getAllRequests(token), getUsers()])
+      const allRequests = await getAllRequests(token)
       setRequests(allRequests)
-      setUsers(allUsers)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -247,10 +246,6 @@ export function ReviewQueuePage() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
-
-  function nameFor(userId) {
-    return users.find((u) => u.user_id === userId)?.name || `user #${userId}`
-  }
 
   function handleClaimChanged(requestId, updatedRequest) {
     setRequests((prev) => prev.map((r) => (r.request_id === requestId ? updatedRequest : r)))

@@ -15,10 +15,13 @@ This project was built to demonstrate both software engineering skills (schema d
 ## Features
 
 - **Request submission** — requesters submit categorized requests (access, hardware, software, bug report, and more) with a priority level
-- **Review workflow** — reviewers approve or reject requests; rejections require a written justification, enforced at the application layer
+- **Review workflow** — reviewers claim, then approve or reject requests; rejections (and any override of a prior decision) require a written justification, enforced at the application layer
 - **Role-based access** — requester, reviewer, and admin roles with distinct permissions
-- **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input
-- **Admin dashboard** — full visibility into all requests and reviews across the system
+- **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input; login is rate-limited to slow down brute-force attempts
+- **AI chatbot assistant** — a chat widget (Claude, tool-calling) lets requesters create requests and check on existing ones conversationally; degrades gracefully to a "use the form instead" message if the Anthropic API is unavailable
+- **Proactive duplicate detection** — before a request is created (via the form or the chatbot), it's checked against the requester's own open/in-progress requests and flagged if it looks like a likely duplicate
+- **Admin analytics dashboard** — volume trends by category, unusual-activity spikes, and average time-to-resolution by category/priority
+- **Admin dashboard** — full visibility into all requests and reviews across the system, plus the ability to override a previous decision
 - **Audit trail** — every review is its own timestamped record tied to the reviewer and the request
 
 ## Tech Stack
@@ -27,7 +30,8 @@ This project was built to demonstrate both software engineering skills (schema d
 - **Database:** PostgreSQL
 - **Frontend:** React, Vite, Tailwind CSS
 - **Auth:** JWT (python-jose), bcrypt (passlib)
-- **Testing:** pytest, FastAPI TestClient
+- **AI:** Anthropic Claude API (chatbot tool-calling, duplicate-detection classification)
+- **Testing:** pytest + FastAPI TestClient (backend), Vitest + React Testing Library (frontend)
 - **Infra:** Docker, Docker Compose, GitHub Actions (CI/CD)
 - **Cloud:** AWS (RDS, EC2, Application Load Balancer, S3, CloudFront, Route 53, ACM)
 
@@ -53,7 +57,7 @@ role                 │     priority                │     comment_text
 - **Reviews are a separate table, not a status column on requests** — a review is a distinct event with its own actor and timestamp, not a fixed attribute of a request. This also allows the audit trail to show *who* reviewed *what* and *when*, independent of the request itself.
 - **Roles live in a single `users` table with a `role` column**, rather than separate tables per role — all users share the same core attributes (name, email, password), and role is just a classification, not a structurally different entity.
 - **Comment justification on rejection is enforced in application logic, not a database constraint** — this is a conditional rule (required only when `decision = 'NOT APPROVED'`) that depends on the relationship between two columns, which a simple `CHECK` constraint can't express cleanly. The database still enforces `NOT NULL`/`CHECK` constraints for everything that *is* a fixed, structural rule (foreign keys, allowed enum values).
-- **Status is system-controlled, not client-controlled** — a request always starts at `open` via the database default; only the review workflow can change it, preventing a requester from submitting an already-"resolved" request.
+- **Status is system-controlled, not client-controlled** — a request always starts at `open` via the database default; every subsequent transition goes through a role-checked route (claim, unclaim, review decision, or a direct status update), and a request that's already been `approved`/`rejected` can only change via the review-override flow (admin-only, comment required) — never by a raw client-supplied status.
 
 ## Live Deployment
 
@@ -77,7 +81,7 @@ For the full step-by-step deployment process, see [docs/deployment-runbook.md](d
 
 **Backend:**
 1. Clone the repo
-2. `cd backend`, copy `.env.example` to `.env` and fill in local values
+2. `cd backend`, copy `.env.example` to `.env` and fill in local values (`ANTHROPIC_API_KEY` is optional — the chatbot and duplicate-detection features just no-op/degrade gracefully without it)
 3. From the project root: `docker compose up -d` (starts PostgreSQL)
 4. `python3 -m venv venv && source venv/bin/activate`
 5. `pip install -r requirements.txt --break-system-packages`
@@ -92,9 +96,14 @@ For the full step-by-step deployment process, see [docs/deployment-runbook.md](d
 
 **Tests:**
 ```bash
+# Backend
 cd backend
 pytest
 pytest --cov=. --cov-report=term-missing
+
+# Frontend
+cd frontend
+npm test
 ```
 
 ## Database Migrations
@@ -116,30 +125,40 @@ alembic upgrade head
 
 Schema changes should **always** go through this workflow now — not manual `ALTER TABLE` statements against RDS. Manual DDL is exactly what caused a schema-drift incident (columns present in `models.py` but missing in production), which motivated adopting Alembic.
 
+**CI enforces this automatically:** every push/PR runs `alembic upgrade head` followed by `alembic check` against a real Postgres instance, which fails the build if `models.py` and the migration history have diverged — so a forgotten migration is caught in CI instead of surfacing as a drift incident in production again.
+
 ## Project Structure
 
 ```
 requestFlow/
 ├── backend/
-│   ├── main.py              # FastAPI routes
-│   ├── models.py            # SQLAlchemy models
-│   ├── database.py          # DB connection, session management
-│   ├── auth.py               # Password hashing, JWT, auth dependency
-│   ├── alembic/               # Database migration scripts (env.py, versions/)
+│   ├── main.py                 # FastAPI routes
+│   ├── models.py               # SQLAlchemy models (single source of truth for schema + enums)
+│   ├── database.py             # DB connection, session management
+│   ├── auth.py                 # Password hashing, JWT, auth dependency
+│   ├── request_service.py      # Request/review business logic shared by routes + chatbot tools
+│   ├── chat.py                 # /chat route
+│   ├── chatbot.py              # Claude tool-calling loop (create/check requests)
+│   ├── duplicate_detection.py  # Proactive duplicate-check (Claude classification)
+│   ├── analytics.py            # Admin analytics aggregation
+│   ├── rate_limit.py           # In-memory per-process rate limiting
+│   ├── timeutils.py            # Naive-UTC now() helper
+│   ├── alembic/                # Database migration scripts (env.py, versions/)
 │   ├── alembic.ini
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   └── tests/                # pytest unit + integration tests
+│   └── tests/                  # pytest unit + integration tests
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/            # Route-level components
-│   │   ├── components/       # Shared UI components
-│   │   ├── api/               # API client functions
-│   │   └── context/           # Auth context/state
+│   │   ├── pages/       # Route-level components
+│   │   ├── components/  # Shared UI components
+│   │   ├── api/         # API client functions
+│   │   ├── context/     # Auth + shared user-directory state
+│   │   └── test/        # Vitest setup
 │   └── package.json
-├── .github/workflows/ci.yml  # CI pipeline (tests + build on push/PR)
-├── docker-compose.yaml       # Local PostgreSQL container
-└── deploy_checklist.md       # AWS deployment runbook
+├── .github/workflows/ci.yml    # CI pipeline (backend tests + migration check, frontend tests + build)
+├── docker-compose.yaml         # Local PostgreSQL container
+└── docs/deployment-runbook.md  # AWS deployment runbook
 ```
 
 ## Screenshots
@@ -148,8 +167,12 @@ requestFlow/
 
 ## Future Enhancements
 
-- Conversational agent for guided request submission via natural-language Q&A
+- ~~Conversational agent for guided request submission via natural-language Q&A~~ — done, see [Features](#features)
+- ~~Proactive duplicate detection~~ — done, see [Features](#features)
+- ~~Admin analytics dashboard~~ — done, see [Features](#features)
 - ~~Database migrations (Alembic)~~ — done. A real schema-drift incident (columns in `models.py` missing from production, caused by manual `ALTER TABLE` statements) motivated adopting Alembic; see [Database Migrations](#database-migrations)
+- **Invite/approval-based role assignment** — registration currently lets anyone self-select `requester`/`reviewer`/`admin` at signup (`RegisterPage.jsx`), which is intentional for a portfolio demo ("pick the role you want to demo") but is the first thing to change before this touches anything real
+- **Shared-store rate limiting** — login/chat/duplicate-check are rate-limited (`rate_limit.py`), but the limiter is in-memory and per-process, so it only holds under a single backend instance; a multi-instance deployment needs a shared store (e.g. Redis) instead
 - Audit history table tracking full status-change history per request (currently only the terminal decision is recorded)
 - Auto-scaling / multi-AZ for the backend and database (currently single-instance, appropriate for a portfolio project but a documented gap versus production-grade HA)
 

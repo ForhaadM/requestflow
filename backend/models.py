@@ -46,7 +46,12 @@ class Requests(Base):
         "request_type IN (" + ", ".join(f"'{t}'" for t in REQUEST_TYPES) + ")"
     ),
     CheckConstraint("priority IN (" + ", ".join(f"'{p}'" for p in PRIORITIES) + ")"),
-    CheckConstraint("status IN ('open', 'in-progress', 'resolved', 'closed', 'approved', 'rejected')"),
+    # "resolved" was never wired up on any code path (StatusEnum in main.py
+    # only allows open/in-progress/closed; review decisions only ever set
+    # approved/rejected) — dropped rather than left as a reachable-looking
+    # but dead status. See alembic/versions for the migration that removes
+    # it from the DB constraint too.
+    CheckConstraint("status IN ('open', 'in-progress', 'closed', 'approved', 'rejected')", name="requests_status_check"),
 )
 
 class Reviews(Base):

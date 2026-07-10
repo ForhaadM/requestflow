@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import { getAllRequests } from '../api/requests'
 import { getReviews } from '../api/reviews'
-import { getUsers } from '../api/auth'
 import { DecisionBadge } from '../components/Badge'
 import { FilterDropdown } from '../components/FilterDropdown'
 import { Spinner } from '../components/Spinner'
@@ -17,19 +17,18 @@ const FILTER_TO_DECISION = { Approved: 'APPROVED', Rejected: 'NOT APPROVED' }
 
 export function CompletedReviewsPage() {
   const { token } = useAuth()
+  const { nameFor: requesterName } = useUsers()
   const [reviews, setReviews] = useState([])
   const [requests, setRequests] = useState([])
-  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('All')
 
   useEffect(() => {
-    Promise.all([getReviews(token), getAllRequests(token), getUsers()])
-      .then(([rv, req, u]) => {
+    Promise.all([getReviews(token), getAllRequests(token)])
+      .then(([rv, req]) => {
         setReviews(rv)
         setRequests(req)
-        setUsers(u)
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
@@ -45,10 +44,6 @@ export function CompletedReviewsPage() {
 
   function requestFor(id) {
     return requests.find((r) => r.request_id === id)
-  }
-
-  function requesterName(userId) {
-    return users.find((u) => u.user_id === userId)?.name || `user #${userId}`
   }
 
   if (loading) return <Spinner />

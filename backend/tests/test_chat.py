@@ -27,6 +27,21 @@ def test_chat_requires_auth(client):
     assert response.status_code == 401
 
 
+def test_chat_message_too_long_rejected(client, auth_headers):
+    response = client.post(
+        "/chat", json={"message": "x" * 2001, "history": []}, headers=auth_headers
+    )
+    assert response.status_code == 422
+
+
+def test_chat_history_too_long_rejected(client, auth_headers):
+    oversized_history = [{"role": "user", "content": "hi"} for _ in range(41)]
+    response = client.post(
+        "/chat", json={"message": "hi", "history": oversized_history}, headers=auth_headers
+    )
+    assert response.status_code == 422
+
+
 def test_chat_simple_reply(client, auth_headers):
     with patch.object(chatbot._client.messages, "create", return_value=_text_response("Hello there!")) as mock_create:
         response = client.post("/chat", json={"message": "hi", "history": []}, headers=auth_headers)

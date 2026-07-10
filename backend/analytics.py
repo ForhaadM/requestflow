@@ -4,6 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import Requests, Reviews, REQUEST_TYPES, PRIORITIES
+from timeutils import utcnow
 
 # Pure SQL aggregation over existing requests/reviews data — no AI/LLM calls,
 # no schema changes. Thresholds below are deliberately simple ("directionally
@@ -33,7 +34,7 @@ def _volume_by_category(db: Session, since: datetime, until: datetime) -> dict[s
 def get_volume_trends(db: Session, now: datetime | None = None) -> list[dict]:
     """Request volume by category over the last 30 days, split into two 15-day
     halves so we can say whether each category is trending up or down."""
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     window_start = now - timedelta(days=WINDOW_DAYS)
     midpoint = now - timedelta(days=RECENT_DAYS)
 
@@ -65,7 +66,7 @@ def get_volume_trends(db: Session, now: datetime | None = None) -> list[dict]:
 def get_spikes(db: Session, now: datetime | None = None) -> list[dict]:
     """Categories whose volume in the last 7 days is well above what their
     trailing 4-week average would predict for a 7-day window."""
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     baseline_days = SPIKE_BASELINE_WEEKS * 7
     baseline_start = now - timedelta(days=baseline_days + SPIKE_WINDOW_DAYS)
     baseline_end = now - timedelta(days=SPIKE_WINDOW_DAYS)

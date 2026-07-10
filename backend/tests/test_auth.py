@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
 from jose import jwt
 
 from auth import ALGORITHM, SECRET_KEY, create_access_token, get_current_user, hash_password, verify_password
+from timeutils import utcnow
 
 
 def test_hash_password_does_not_return_plaintext():
@@ -37,9 +38,9 @@ def test_create_access_token_contains_sub_claim():
 def test_create_access_token_sets_future_expiry():
     token = create_access_token({"sub": "42"})
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    expire = datetime.utcfromtimestamp(payload["exp"])
-    assert expire > datetime.utcnow()
-    assert expire < datetime.utcnow() + timedelta(minutes=31)
+    expire = datetime.fromtimestamp(payload["exp"], tz=timezone.utc).replace(tzinfo=None)
+    assert expire > utcnow()
+    assert expire < utcnow() + timedelta(minutes=31)
 
 
 def test_get_current_user_invalid_token_rejected(db_session):

@@ -1,22 +1,18 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from database import engine, get_db
-from models import User, Requests, Reviews
+from models import User, Requests, Reviews, REQUEST_TYPES, PRIORITIES
 from typing import Optional
 from enum import Enum
 from auth import hash_password, verify_password, create_access_token, get_current_user
-from request_service import create_request_for_user, get_request_for_user
+from request_service import create_request_for_user, get_request_for_user, create_review_for_user
 from chat import router as chat_router
 from duplicate_detection import check_similar_requests
 from analytics import get_admin_analytics
-
-
-# Request types that represent an issue being fixed rather than something being
-# granted, so an "approval" means work was done and should say how.
-ISSUE_REQUEST_TYPES = {"bug-report", "network", "facilities"}
+from rate_limit import enforce_rate_limit
 
 app = FastAPI()
 
@@ -50,8 +46,18 @@ class UserPublic(BaseModel):
     role: str
 
 
+@app.get("/users/me", response_model=UserPublic)
+def get_current_user_profile(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
 @app.get("/users", response_model=list[UserPublic])
-def get_users(db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Full directory (names/emails/roles) is only needed by reviewer/admin
+    # screens to label requesters and claimants — regular requesters use
+    # GET /users/me instead, so this doesn't need to be world-readable.
+    if current_user.role not in ["reviewer", "admin"]:
+        raise HTTPException(status_code=403, detail="Only reviewers or admins can list all users.")
     return db.query(User).order_by(User.user_id).all()
 
 @app.get("/requests")
@@ -84,26 +90,41 @@ def get_review(request_id: int, db: Session = Depends(get_db), current_user: Use
     existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
     if not existing_request:
         raise HTTPException(status_code=404, detail="Request not found.")
-    if current_user.role != "admin" and current_user.user_id != existing_request.requester_reference:
+
+    is_owner = current_user.user_id == existing_request.requester_reference
+    is_admin = current_user.role == "admin"
+    # A reviewer who claimed the request, or who has already left a review on
+    # it (e.g. before an admin overrode their decision), can see the review
+    # history too — not just the original requester or an admin.
+    is_involved_reviewer = current_user.role == "reviewer" and (
+        current_user.user_id == existing_request.claimed_by
+        or db.query(Reviews)
+        .filter(
+            Reviews.request_reference == request_id,
+            Reviews.reviewer_reference == current_user.user_id,
+        )
+        .first()
+        is not None
+    )
+    if not (is_owner or is_admin or is_involved_reviewer):
         raise HTTPException(status_code=403, detail="Not Authorized to see review.")
     return db.query(Reviews).filter(Reviews.request_reference == request_id).order_by(Reviews.reviewed_at).all()
 
-class RequestTypeEnum(str, Enum):
-    hardware = "hardware"
-    software = "software"
-    access_request = "access-request"
-    account_password = "account-password"
-    bug_report = "bug-report"
-    network = "network"
-    onboarding_offboarding = "onboarding-offboarding"
-    facilities = "facilities"
-    other = "other"
+# Derived from models.REQUEST_TYPES/PRIORITIES (the single source of truth
+# also used by the DB check constraints and the chatbot's tool schemas) so
+# this enum can't silently drift out of sync with what the DB actually
+# accepts — see models.py for why that matters.
+RequestTypeEnum = Enum(
+    "RequestTypeEnum",
+    {t.upper().replace("-", "_"): t for t in REQUEST_TYPES},
+    type=str,
+)
 
-class PriorityEnum(str, Enum):
-    p0 = "P0"
-    p1 = "P1"
-    p2 = "P2"
-    p3 = "P3"
+PriorityEnum = Enum(
+    "PriorityEnum",
+    {p: p for p in PRIORITIES},
+    type=str,
+)
 
 class DecisionEnum(str, Enum):
     approved = "APPROVED"
@@ -112,12 +133,12 @@ class DecisionEnum(str, Enum):
 class RequestCreate(BaseModel):
     request_type: RequestTypeEnum
     description: str | None = Field(default=None, max_length=500)
-    priority: PriorityEnum = PriorityEnum.p1
+    priority: PriorityEnum = PriorityEnum.P1
     urgency_justification: str | None = Field(default=None, max_length=300)
 
 class SimilarityCheckRequest(BaseModel):
     request_type: RequestTypeEnum
-    description: str
+    description: str = Field(max_length=500)
 
 class ReviewCreate(BaseModel):
     request_reference: int
@@ -164,6 +185,7 @@ def create_request(request: RequestCreate, db: Session = Depends(get_db), curren
 
 @app.post("/requests/check-similar")
 def check_similar(payload: SimilarityCheckRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    enforce_rate_limit(f"check-similar:{current_user.user_id}", max_requests=20, window_seconds=60)
     matches = check_similar_requests(db, current_user, payload.request_type, payload.description)
     return {"matches": matches}
 
@@ -173,7 +195,11 @@ def claim_request(request_id: int, db: Session = Depends(get_db), current_user: 
     if current_user.role not in ["reviewer", "admin"]:
         raise HTTPException(status_code=403, detail="Only reviewers or admins can claim requests.")
 
-    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    # Lock the row so two reviewers racing to claim the same request can't
+    # both pass the status check before either commits.
+    existing_request = (
+        db.query(Requests).filter(Requests.request_id == request_id).with_for_update().first()
+    )
     if not existing_request:
         raise HTTPException(status_code=404, detail="Request not found.")
 
@@ -189,7 +215,9 @@ def claim_request(request_id: int, db: Session = Depends(get_db), current_user: 
 
 @app.patch("/requests/{request_id}/unclaim")
 def unclaim_request(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    existing_request = (
+        db.query(Requests).filter(Requests.request_id == request_id).with_for_update().first()
+    )
     if not existing_request:
         raise HTTPException(status_code=404, detail="Request not found.")
 
@@ -208,60 +236,13 @@ def unclaim_request(request_id: int, db: Session = Depends(get_db), current_user
 
 @app.post("/reviews")
 def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-
-    if current_user.role not in ["reviewer", "admin"]:
-        raise HTTPException(status_code=403,detail="Only reviewers or admins can review requests.")
-
-    existing_request = db.query(Requests).filter(Requests.request_id == review.request_reference).first()
-    if not existing_request:
-        raise HTTPException(status_code=404, detail="Request not found.")
-
-    # A request already sitting at "approved" or "rejected" was previously
-    # decided; submitting another review on it overrides that decision
-    # (in either direction) rather than being a first-time decision.
-    is_override = existing_request.status in ("approved", "rejected")
-
-    if is_override:
-        if current_user.role != "admin":
-            raise HTTPException(status_code=403, detail="Only admins can override a previous decision.")
-    else:
-        if existing_request.status != "in-progress":
-            raise HTTPException(status_code=400, detail="This request must be claimed before it can be reviewed.")
-        if current_user.role == "reviewer" and existing_request.claimed_by != current_user.user_id:
-            raise HTTPException(status_code=403, detail="Only the reviewer who claimed this request can submit a decision.")
-
-    # Issue-style requests (bugs, network problems, facilities issues) need a
-    # written explanation of how they were fixed, not just a rubber-stamp approval.
-    requires_resolution_notes = existing_request.request_type in ISSUE_REQUEST_TYPES
-
-    comment_required = (
-        review.decision == "NOT APPROVED"
-        or is_override
-        or (review.decision == "APPROVED" and requires_resolution_notes)
-    )
-
-    if comment_required and not review.comment_text:
-        if is_override:
-            detail = "A comment is required when overriding a previous decision."
-        elif review.decision == "APPROVED":
-            detail = "A comment describing how this was resolved is required."
-        else:
-            detail = "A comment is required when rejecting a request."
-        raise HTTPException(status_code=400, detail=detail)
-
-    new_review = Reviews(
+    return create_review_for_user(
+        db,
+        current_user,
         request_reference=review.request_reference,
-        reviewer_reference=current_user.user_id,
         decision=review.decision,
-        comment_text=review.comment_text
+        comment_text=review.comment_text,
     )
-    db.add(new_review)
-
-    existing_request.status = "approved" if review.decision == "APPROVED" else "rejected"
-
-    db.commit()
-    db.refresh(new_review)
-    return new_review
 
 @app.post("/users")
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
@@ -280,22 +261,38 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     return {"user_id": new_user.user_id, "name": new_user.name, "email": new_user.email, "role": new_user.role}
 
 @app.post("/login")
-def user_login(login: UserLogin, db: Session = Depends(get_db)):
+def user_login(login: UserLogin, request: Request, db: Session = Depends(get_db)):
+    # Keyed by client IP since there's no authenticated user yet — bounds
+    # brute-force password guessing against a single account.
+    enforce_rate_limit(f"login:{request.client.host}", max_requests=5, window_seconds=60)
+
     existing_user = db.query(User).filter(User.email == login.email).first()
     if not existing_user or not verify_password(login.password, existing_user.password):
         raise HTTPException(status_code=400, detail="Invalid email or password")
-    
+
     token = create_access_token({"sub": str(existing_user.user_id)})
     return {"access_token": token, "token_type": "bearer"}
 
 @app.patch("/requests/{request_id}/status")
 def update_request_status(request_id: int, status_update: StatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["reviewer", "admin"]:
-        raise HTTPException(status_code=403,detail="Only reviewers or admins can update the request status.") 
-    
-    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+        raise HTTPException(status_code=403,detail="Only reviewers or admins can update the request status.")
+
+    existing_request = (
+        db.query(Requests).filter(Requests.request_id == request_id).with_for_update().first()
+    )
     if not existing_request:
         raise HTTPException(status_code=404, detail="Request not found.")
+
+    # A request that has already been decided (approved/rejected) can only be
+    # changed via POST /reviews' admin-only, comment-required override flow —
+    # otherwise any reviewer could silently reopen a decided request through
+    # this route and bypass that protection entirely.
+    if existing_request.status in ("approved", "rejected"):
+        raise HTTPException(
+            status_code=400,
+            detail="This request has already been decided. Use the review override flow to change its outcome.",
+        )
 
     existing_request.status = status_update.status.value
     db.commit()

@@ -18,6 +18,15 @@ def test_check_similar_endpoint_requires_auth(client):
     assert response.status_code == 401
 
 
+def test_check_similar_description_too_long_rejected(client, auth_headers):
+    response = client.post(
+        "/requests/check-similar",
+        json={"request_type": "hardware", "description": "x" * 501},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+
+
 def test_check_similar_no_candidates_skips_api_call(client, auth_headers):
     with patch.object(duplicate_detection._client.messages, "create") as mock_create:
         response = client.post(
