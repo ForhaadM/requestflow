@@ -71,6 +71,8 @@ RequestFlow is fully deployed on AWS with a custom domain and end-to-end HTTPS:
 - **Security groups scoped per-resource, least-privilege** — RDS only accepts connections from the EC2 instance's security group, EC2's application port only accepts connections from the ALB's security group (not the public internet directly), SSH access to EC2 is restricted to a known IP, and only the ALB's HTTPS port is open publicly
 - **Environment-variable-driven configuration throughout** — no hardcoded credentials or hosts anywhere in the codebase; local development and production deployment run the same code with different `.env` files
 
+For the full step-by-step deployment process, see [docs/deployment-runbook.md](docs/deployment-runbook.md).
+
 ## Getting Started (local development)
 
 **Backend:**
