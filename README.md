@@ -39,7 +39,7 @@ This project was built to demonstrate both software engineering skills (schema d
 
 Three core entities: `users`, `requests`, and `reviews`.
 
-
+```
 users                      requests                    reviews
 ─────                      ────────                    ───────
 user_id (PK)         ┌───▶ request_id (PK)        ┌───▶ review_id (PK)
@@ -52,6 +52,7 @@ role                 │     priority                │     comment_text
 │     claimed_by (FK)          │
 │     created_at               │
 └──────────────────────────────┘
+```
 
 **Key design decisions:**
 - **Reviews are a separate table, not a status column on requests** — a review is a distinct event with its own actor and timestamp, not a fixed attribute of a request. This also allows the audit trail to show *who* reviewed *what* and *when*, independent of the request itself.
