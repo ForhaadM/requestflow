@@ -10,6 +10,10 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  // True only right after an explicit signIn() call (not when a token is
+  // restored from localStorage on page load) — lets the chat widget auto-open
+  // once per login without reopening on every navigation or page refresh.
+  const [justLoggedIn, setJustLoggedIn] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -43,12 +47,18 @@ export function AuthProvider({ children }) {
     setToken(access_token)
     setLoading(true)
     await loadUser(access_token)
+    setJustLoggedIn(true)
+  }
+
+  function clearJustLoggedIn() {
+    setJustLoggedIn(false)
   }
 
   function signOut() {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
+    setJustLoggedIn(false)
   }
 
   // Fired by apiFetch on any 401 (expired/invalid token). Signs out and sends
@@ -67,7 +77,7 @@ export function AuthProvider({ children }) {
   }, [location.pathname])
 
   return (
-    <AuthContext.Provider value={{ token, user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ token, user, loading, signIn, signOut, justLoggedIn, clearJustLoggedIn }}>
       {children}
     </AuthContext.Provider>
   )

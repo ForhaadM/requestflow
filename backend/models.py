@@ -68,3 +68,12 @@ class Reviews(Base):
         CheckConstraint("decision IN ('APPROVED', 'NOT APPROVED')"),
 
     )
+
+class Comments(Base):
+    __tablename__ = "comments"
+
+    comment_id: Mapped[int] = mapped_column(primary_key=True)
+    request_reference: Mapped[int] = mapped_column(ForeignKey("requests.request_id"))
+    commenter_reference: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    comment_text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

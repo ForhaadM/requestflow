@@ -2,17 +2,25 @@ import os
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from database import engine, get_db
-from models import User, Requests, Reviews, REQUEST_TYPES, PRIORITIES
+from models import User, Requests, Reviews, Comments, REQUEST_TYPES, PRIORITIES
 from typing import Optional
 from enum import Enum
 from auth import hash_password, verify_password, create_access_token, get_current_user
-from request_service import create_request_for_user, get_request_for_user, create_review_for_user
+from request_service import (
+    create_request_for_user,
+    get_request_for_user,
+    create_review_for_user,
+    create_comment_for_request,
+    list_comments_for_request,
+)
 from chat import router as chat_router
 from duplicate_detection import check_similar_requests
 from analytics import get_admin_analytics
 from rate_limit import enforce_rate_limit
+from name_validation import is_valid_name, NAME_VALIDATION_MESSAGE
+from password_rules import validate_password_strength
 
 app = FastAPI()
 
@@ -149,6 +157,15 @@ class ReviewCreate(BaseModel):
     decision: DecisionEnum
     comment_text: Optional[str] = None
 
+# 750 chars: enough room for a few sentences of follow-up context (more than
+# urgency_justification's 300, since comments can accumulate over time) while
+# still bounded, consistent with how description/urgency_justification are
+# constrained (Pydantic Field only, no DB-level length check).
+COMMENT_TEXT_MAX_LENGTH = 750
+
+class CommentCreate(BaseModel):
+    comment_text: str = Field(min_length=1, max_length=COMMENT_TEXT_MAX_LENGTH)
+
 class RoleEnum(str, Enum):
     requester = "requester"
     reviewer = "reviewer"
@@ -162,8 +179,21 @@ class StatusEnum(str, Enum):
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str
     role: RoleEnum = RoleEnum.requester
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        if not is_valid_name(name):
+            raise ValueError(NAME_VALIDATION_MESSAGE)
+        return name
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, password: str) -> str:
+        validate_password_strength(password)
+        return password
 
 class UserLogin(BaseModel):
     email: str
@@ -247,6 +277,20 @@ def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_u
         decision=review.decision,
         comment_text=review.comment_text,
     )
+
+@app.get("/requests/{request_id}/comments")
+def get_comments(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return list_comments_for_request(db, current_user, request_id)
+
+
+@app.post("/requests/{request_id}/comments")
+def add_comment(
+    request_id: int,
+    comment: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return create_comment_for_request(db, current_user, request_id, comment.comment_text)
 
 @app.post("/users")
 def register_user(user: UserCreate, db: Session = Depends(get_db)):

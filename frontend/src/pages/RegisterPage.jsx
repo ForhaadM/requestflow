@@ -3,6 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { registerUser } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
 import { Alert } from '../components/Alert'
+import { PasswordRequirements } from '../components/PasswordRequirements'
+import { isValidName, NAME_VALIDATION_MESSAGE } from '../lib/nameValidation'
+import { isPasswordValid } from '../lib/passwordRules'
 
 const ROLES = ['requester', 'reviewer', 'admin']
 
@@ -17,9 +20,22 @@ export function RegisterPage() {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
   }
 
+  const nameTouched = form.name.length > 0
+  const nameValid = isValidName(form.name)
+  const passwordValid = isPasswordValid(form.password)
+  const canSubmit = nameValid && passwordValid
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    if (!nameValid) {
+      setError(NAME_VALIDATION_MESSAGE)
+      return
+    }
+    if (!passwordValid) {
+      setError('Please meet all password requirements.')
+      return
+    }
     setSubmitting(true)
     try {
       await registerUser(form)
@@ -50,8 +66,15 @@ export function RegisterPage() {
               required
               value={form.name}
               onChange={update('name')}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className={`mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${
+                nameTouched && !nameValid
+                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                  : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'
+              }`}
             />
+            {nameTouched && !nameValid && (
+              <p className="mt-1 text-xs text-red-600">{NAME_VALIDATION_MESSAGE}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700">Email</label>
@@ -68,11 +91,12 @@ export function RegisterPage() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={8}
               value={form.password}
               onChange={update('password')}
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
+            {form.password.length > 0 && <PasswordRequirements password={form.password} />}
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700">Role</label>
@@ -93,7 +117,7 @@ export function RegisterPage() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !canSubmit}
             className="w-full cursor-pointer rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? 'Creating account…' : 'Create account'}

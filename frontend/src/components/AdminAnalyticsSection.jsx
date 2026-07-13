@@ -98,6 +98,46 @@ export function AdminAnalyticsSection({ token }) {
         </div>
       </div>
 
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-700">SLA compliance</h3>
+        <p className="mt-1 text-xs text-slate-400">
+          Resolved requests are compared to their priority's SLA window ({PRIORITY_LABELS.P0}: 2h, {PRIORITY_LABELS.P1}: 12h,{' '}
+          {PRIORITY_LABELS.P2}: 7d, {PRIORITY_LABELS.P3}: 14d) from creation.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Overall</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">
+              {data.sla_compliance.overall.compliance_rate === null ? '—' : `${data.sla_compliance.overall.compliance_rate}%`}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {data.sla_compliance.overall.resolved_breached} breached / {data.sla_compliance.overall.resolved_total} resolved
+            </p>
+            {data.sla_compliance.overall.currently_breached_open > 0 && (
+              <p className="mt-1 text-xs font-medium text-red-600">
+                {data.sla_compliance.overall.currently_breached_open} open past SLA now
+              </p>
+            )}
+          </div>
+          {data.sla_compliance.by_priority.map((p) => (
+            <div key={p.priority} className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                {PRIORITY_LABELS[p.priority] || p.priority}
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">
+                {p.compliance_rate === null ? '—' : `${p.compliance_rate}%`}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {p.resolved_breached} breached / {p.resolved_total} resolved
+              </p>
+              {p.currently_breached_open > 0 && (
+                <p className="mt-1 text-xs font-medium text-red-600">{p.currently_breached_open} open past SLA</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-slate-700">Avg. days to resolution by category</h3>

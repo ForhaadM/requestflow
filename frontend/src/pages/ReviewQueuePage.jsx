@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useUsers } from '../context/UsersContext'
 import { getAllRequests, claimRequest, unclaimRequest } from '../api/requests'
 import { createReview } from '../api/reviews'
-import { PriorityBadge } from '../components/Badge'
+import { PriorityBadge, SlaBadge } from '../components/Badge'
 import { ClaimToggle } from '../components/ClaimToggle'
 import { FadeSlide } from '../components/FadeSlide'
 import { Spinner } from '../components/Spinner'
@@ -11,8 +11,8 @@ import { Alert } from '../components/Alert'
 import { PageHeader } from '../components/PageHeader'
 import { StatTile } from '../components/StatTile'
 import { EmptyState } from '../components/EmptyState'
+import { RequestDetailPanel } from '../components/RequestDetailPanel'
 import { priorityRank } from '../lib/priority'
-import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel, decisionVerbsFor, requiresResolutionNotes } from '../lib/requestTypes'
 
 function ChevronIcon({ expanded }) {
@@ -141,7 +141,7 @@ function DecisionForm({ request, token, onReviewed }) {
   )
 }
 
-function QueueRow({ request, requesterName, claimantName, currentUser, token, expanded, onToggleExpand, onClaimChanged, onReviewed }) {
+function QueueRow({ request, requesterName, requesterEmail, claimantName, currentUser, token, expanded, onToggleExpand, onClaimChanged, onReviewed }) {
   const [claiming, setClaiming] = useState(false)
   const [claimError, setClaimError] = useState('')
 
@@ -182,6 +182,7 @@ function QueueRow({ request, requesterName, claimantName, currentUser, token, ex
           <span className="text-sm text-slate-500">· {requestTypeLabel(request.request_type)}</span>
         </button>
         <PriorityBadge priority={request.priority} />
+        <SlaBadge priority={request.priority} createdAt={request.created_at} />
         <ClaimToggle
           claimed={claimed}
           claimantName={claimantName}
@@ -195,17 +196,13 @@ function QueueRow({ request, requesterName, claimantName, currentUser, token, ex
 
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
-          <p className="text-xs text-slate-400">Submitted {formatDateTime(request.created_at)}</p>
-
-          <p className="mt-3 text-xs font-medium text-slate-500">Request Description:</p>
-          <p className="mt-1 text-sm text-slate-600">{request.description || 'No description provided.'}</p>
-
-          {request.urgency_justification && (
-            <div className="mt-3 rounded-md bg-red-50 px-3 py-2 ring-1 ring-inset ring-red-200">
-              <p className="text-xs font-medium text-red-700">Why this is Urgent</p>
-              <p className="mt-0.5 text-sm text-red-700">{request.urgency_justification}</p>
-            </div>
-          )}
+          <RequestDetailPanel
+            request={request}
+            token={token}
+            requesterEmail={requesterEmail}
+            requesterName={requesterName}
+            canAddComment={false}
+          />
 
           <FadeSlide show={canDecide}>
             <DecisionForm request={request} token={token} onReviewed={onReviewed} />
@@ -223,7 +220,7 @@ function QueueRow({ request, requesterName, claimantName, currentUser, token, ex
 
 export function ReviewQueuePage() {
   const { token, user } = useAuth()
-  const { nameFor } = useUsers()
+  const { nameFor, emailFor } = useUsers()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -244,6 +241,15 @@ export function ReviewQueuePage() {
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  // A request created through the chat widget (which stays mounted across
+  // navigation, unlike the New Request form's own page) broadcasts this
+  // event instead of this page having any other way to learn about it.
+  useEffect(() => {
+    window.addEventListener('requests:changed', load)
+    return () => window.removeEventListener('requests:changed', load)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
@@ -296,6 +302,7 @@ export function ReviewQueuePage() {
               key={r.request_id}
               request={r}
               requesterName={nameFor(r.requester_reference)}
+              requesterEmail={emailFor(r.requester_reference)}
               claimantName={r.claimed_by ? nameFor(r.claimed_by) : null}
               currentUser={user}
               token={token}

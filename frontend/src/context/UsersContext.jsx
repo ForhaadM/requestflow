@@ -49,8 +49,12 @@ export function UsersProvider({ children }) {
     return users.find((u) => u.user_id === userId)?.name || `user #${userId}`
   }
 
+  function emailFor(userId) {
+    return users.find((u) => u.user_id === userId)?.email || null
+  }
+
   return (
-    <UsersContext.Provider value={{ users, loading, error, ensureLoaded, nameFor }}>
+    <UsersContext.Provider value={{ users, loading, error, ensureLoaded, nameFor, emailFor }}>
       {children}
     </UsersContext.Provider>
   )

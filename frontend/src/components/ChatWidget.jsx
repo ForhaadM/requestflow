@@ -4,13 +4,13 @@ import { sendChatMessage } from '../api/chat'
 import { ApiError } from '../api/client'
 
 const QUICK_OPTIONS = [
-  { label: 'Create a new request', message: 'I want to create a new request.' },
+  { label: 'Create a new request', message: 'I want to create a new request.', intent: 'create_request_menu' },
   { label: 'Check on a request', message: "What's the status of my requests?" },
   { label: 'What can I submit?', message: 'What request types can I submit?' },
 ]
 
 export function ChatWidget() {
-  const { token, user } = useAuth()
+  const { token, user, justLoggedIn, clearJustLoggedIn } = useAuth()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -23,6 +23,16 @@ export function ChatWidget() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, open, sending])
+
+  // Auto-open once per login (not on every navigation/reload) so new users
+  // notice the assistant exists. The flag is consumed immediately, so closing
+  // the widget afterward doesn't cause it to reopen for the rest of the session.
+  useEffect(() => {
+    if (justLoggedIn) {
+      setOpen(true)
+      clearJustLoggedIn()
+    }
+  }, [justLoggedIn, clearJustLoggedIn])
 
   // Click-outside-to-close: only listens while the panel is open, and skips
   // the bubble button's own click so opening isn't immediately undone.
@@ -39,7 +49,7 @@ export function ChatWidget() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
-  async function sendMessage(text) {
+  async function sendMessage(text, intent) {
     if (!text || sending) return
 
     const history = messages.map(({ role, content }) => ({ role, content }))
@@ -48,8 +58,15 @@ export function ChatWidget() {
     setSending(true)
 
     try {
-      const { reply } = await sendChatMessage(token, text, history)
+      const { reply, request_created } = await sendChatMessage(token, text, history, intent)
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+      // Any request list already on screen (My Requests, Review Queue, the
+      // admin dashboard, ...) fetched once on mount and has no way to know
+      // about a request created through this always-mounted widget —
+      // broadcast it the same way apiFetch already broadcasts auth:unauthorized.
+      if (request_created) {
+        window.dispatchEvent(new CustomEvent('requests:changed'))
+      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Something went wrong. Please try again.'
       setMessages((prev) => [...prev, { role: 'assistant', content: message, isError: true }])
@@ -68,7 +85,7 @@ export function ChatWidget() {
       <button
         onClick={() => setOpen(true)}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-colors hover:bg-indigo-700"
-        aria-label="Open chat assistant"
+        aria-label="Open Flowy Assistant"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
           <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h4m8-2a8 8 0 11-16 0 8 8 0 0116 0z" />
@@ -84,7 +101,7 @@ export function ChatWidget() {
       className="fixed bottom-6 right-6 z-50 flex h-[32rem] w-96 max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
     >
       <div className="flex items-center justify-between border-b border-slate-200 bg-indigo-600 px-4 py-3">
-        <span className="text-sm font-semibold text-white">RequestFlow Assistant</span>
+        <span className="text-sm font-semibold text-white">Flowy Assistant</span>
         <button
           onClick={() => setOpen(false)}
           className="cursor-pointer rounded-md p-1 text-indigo-100 hover:bg-indigo-700 hover:text-white"
@@ -107,7 +124,7 @@ export function ChatWidget() {
                 <button
                   key={option.label}
                   type="button"
-                  onClick={() => sendMessage(option.message)}
+                  onClick={() => sendMessage(option.message, option.intent)}
                   disabled={sending}
                   className="cursor-pointer rounded-md border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-left text-sm text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >

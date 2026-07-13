@@ -11,12 +11,13 @@ vi.mock('./AuthContext', async () => {
 })
 
 function Consumer() {
-  const { users, loading, nameFor } = useUsers()
+  const { users, loading, nameFor, emailFor } = useUsers()
   return (
     <div>
       <div data-testid="loading">{String(loading)}</div>
       <div data-testid="count">{users.length}</div>
       <div data-testid="name">{nameFor(2)}</div>
+      <div data-testid="email">{emailFor(2) || 'none'}</div>
     </div>
   )
 }
@@ -41,6 +42,7 @@ describe('UsersContext', () => {
 
     await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('2'))
     expect(screen.getByTestId('name')).toHaveTextContent('Bob')
+    expect(screen.getByTestId('email')).toHaveTextContent('b@example.com')
     expect(authApi.getUsers).toHaveBeenCalledWith('fake-token')
     expect(authApi.getUsers).toHaveBeenCalledTimes(1)
   })
@@ -68,6 +70,7 @@ describe('UsersContext', () => {
     )
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
     expect(screen.getByTestId('name')).toHaveTextContent('user #2')
+    expect(screen.getByTestId('email')).toHaveTextContent('none')
   })
 
   it('does not fetch before a token is available', () => {

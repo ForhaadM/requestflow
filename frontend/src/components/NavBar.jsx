@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { NAV_VISIBILITY } from '../lib/navVisibility'
 
 const linkClass = ({ isActive }) =>
   `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
@@ -23,11 +24,11 @@ export function NavBar() {
             Request<span className="text-indigo-600">Flow</span>
           </span>
           <nav className="flex items-center gap-1">
-            {(user?.role === 'requester' || user?.role === 'admin') && (
-              <>
-                <NavLink to="/requests/new" className={linkClass}>New Request</NavLink>
-                <NavLink to="/requests/mine" className={linkClass}>My Requests</NavLink>
-              </>
+            {NAV_VISIBILITY.newRequest.includes(user?.role) && (
+              <NavLink to="/requests/new" className={linkClass}>New Request</NavLink>
+            )}
+            {NAV_VISIBILITY.myRequests.includes(user?.role) && (
+              <NavLink to="/requests/mine" className={linkClass}>My Requests</NavLink>
             )}
             {(user?.role === 'reviewer' || user?.role === 'admin') && (
               <NavLink to="/review" end className={linkClass}>Review Queue</NavLink>

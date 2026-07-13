@@ -51,6 +51,8 @@ def test_chat_simple_reply(client, auth_headers):
     assert body["reply"] == "Hello there!"
     assert body["history"][-1] == {"role": "assistant", "content": "Hello there!"}
     assert body["history"][-2] == {"role": "user", "content": "hi"}
+    # No request was created on this turn, so the client shouldn't be told to refresh its lists.
+    assert body["request_created"] is False
     mock_create.assert_called_once()
 
 
@@ -69,7 +71,11 @@ def test_chat_create_request_tool_call(client, auth_headers, db_session):
         )
 
     assert response.status_code == 200
-    assert response.json()["reply"] == "I've created your hardware request."
+    body = response.json()
+    assert body["reply"] == "I've created your hardware request."
+    # Signals the client to refresh My Requests / Review Queue / etc. — this
+    # is what fixes those lists not updating live after a chatbot-created request.
+    assert body["request_created"] is True
 
     created = db_session.query(Requests).filter(Requests.description == "New monitor").first()
     assert created is not None
@@ -192,7 +198,9 @@ def test_chat_create_request_blocks_on_duplicate_and_reports_it(client, auth_hea
             )
 
     assert response.status_code == 200
-    # not created — the tool returned a duplicate_warning instead
+    # not created — the tool returned a duplicate_warning instead, so the
+    # client shouldn't be told to refresh its lists for a non-event
+    assert response.json()["request_created"] is False
     created = db_session.query(Requests).filter(Requests.description == "Printer still not working").first()
     assert created is None
 
@@ -201,6 +209,80 @@ def test_chat_create_request_blocks_on_duplicate_and_reports_it(client, auth_hea
     assert tool_result_content["is_error"] is False
     assert "duplicate_warning" in tool_result_content["content"]
     assert "47" in tool_result_content["content"]
+
+
+def test_chat_create_request_menu_intent_skips_the_llm_call(client, auth_headers):
+    with patch.object(chatbot._client.messages, "create") as mock_create:
+        response = client.post(
+            "/chat",
+            json={"message": "I want to create a new request.", "history": [], "intent": "create_request_menu"},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reply"] == chatbot.CREATE_REQUEST_MENU_REPLY
+    assert "1. Hardware" in body["reply"]
+    mock_create.assert_not_called()
+
+
+def test_chat_type_selection_by_number_resolves_correctly(client, auth_headers):
+    history = [
+        {"role": "user", "content": "I want to create a new request."},
+        {"role": "assistant", "content": chatbot.CREATE_REQUEST_MENU_REPLY},
+    ]
+    final = _text_response("Got it, a software request. How urgent is this?")
+
+    with patch.object(chatbot._client.messages, "create", return_value=final) as mock_create:
+        response = client.post(
+            "/chat",
+            json={"message": "2", "history": history},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    sent_messages = mock_create.call_args.kwargs["messages"]
+    assert sent_messages[-1]["content"] == "I'd like to create a Software request."
+    # the raw reply the user actually typed is preserved in the returned history, not the rewrite
+    assert response.json()["history"][-2] == {"role": "user", "content": "2"}
+
+
+def test_chat_type_selection_by_name_resolves_correctly(client, auth_headers):
+    history = [
+        {"role": "user", "content": "I want to create a new request."},
+        {"role": "assistant", "content": chatbot.CREATE_REQUEST_MENU_REPLY},
+    ]
+    final = _text_response("Got it, a bug report. How urgent is this?")
+
+    with patch.object(chatbot._client.messages, "create", return_value=final) as mock_create:
+        response = client.post(
+            "/chat",
+            json={"message": "bug-report", "history": history},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    sent_messages = mock_create.call_args.kwargs["messages"]
+    assert sent_messages[-1]["content"] == "I'd like to create a Bug Report request."
+
+
+def test_chat_unrecognized_reply_to_menu_falls_back_to_raw_message(client, auth_headers):
+    history = [
+        {"role": "user", "content": "I want to create a new request."},
+        {"role": "assistant", "content": chatbot.CREATE_REQUEST_MENU_REPLY},
+    ]
+    final = _text_response("I'm not sure I understood that — could you pick a number 1-9?")
+
+    with patch.object(chatbot._client.messages, "create", return_value=final) as mock_create:
+        response = client.post(
+            "/chat",
+            json={"message": "not a valid option", "history": history},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    sent_messages = mock_create.call_args.kwargs["messages"]
+    assert sent_messages[-1]["content"] == "not a valid option"
 
 
 def test_chat_create_request_confirmed_duplicate_bypasses_check(client, auth_headers, db_session):

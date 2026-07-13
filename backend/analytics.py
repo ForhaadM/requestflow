@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 
 from models import Requests, Reviews, REQUEST_TYPES, PRIORITIES
 from timeutils import utcnow
+from sla import is_breached
+
+OPEN_STATUSES = ("open", "in-progress")
 
 # Pure SQL aggregation over existing requests/reviews data — no AI/LLM calls,
 # no schema changes. Thresholds below are deliberately simple ("directionally
@@ -160,10 +163,63 @@ def get_avg_resolution_by_priority(db: Session) -> list[dict]:
     ]
 
 
+def get_sla_compliance(db: Session, now: datetime | None = None) -> dict:
+    """SLA compliance, computed from each request's created_at + its priority's
+    SLA window (see sla.py) rather than a persisted deadline. Resolved requests
+    are binned met/breached by comparing their first decision's timestamp to
+    the deadline; still-open/in-progress requests past their deadline are
+    reported separately as current breaches (they haven't "failed" the SLA in
+    a final sense, but they need attention now)."""
+    now = now or utcnow()
+    first_review = _first_decision_subquery(db)
+
+    resolved_rows = (
+        db.query(Requests.priority, Requests.created_at, first_review.c.first_reviewed_at)
+        .join(first_review, first_review.c.request_id == Requests.request_id)
+        .filter(Requests.status.in_(TERMINAL_STATUSES))
+        .all()
+    )
+    open_rows = (
+        db.query(Requests.priority, Requests.created_at)
+        .filter(Requests.status.in_(OPEN_STATUSES))
+        .all()
+    )
+
+    by_priority = {p: {"resolved_met": 0, "resolved_breached": 0, "open_breached": 0} for p in PRIORITIES}
+    for priority, created_at, first_reviewed_at in resolved_rows:
+        key = "resolved_breached" if is_breached(priority, created_at, first_reviewed_at, now) else "resolved_met"
+        by_priority[priority][key] += 1
+    for priority, created_at in open_rows:
+        if is_breached(priority, created_at, None, now):
+            by_priority[priority]["open_breached"] += 1
+
+    def _summarize(counts: dict) -> dict:
+        resolved_total = counts["resolved_met"] + counts["resolved_breached"]
+        return {
+            "resolved_total": resolved_total,
+            "resolved_met": counts["resolved_met"],
+            "resolved_breached": counts["resolved_breached"],
+            "compliance_rate": round(100 * counts["resolved_met"] / resolved_total, 1) if resolved_total else None,
+            "currently_breached_open": counts["open_breached"],
+        }
+
+    overall_counts = {
+        "resolved_met": sum(v["resolved_met"] for v in by_priority.values()),
+        "resolved_breached": sum(v["resolved_breached"] for v in by_priority.values()),
+        "open_breached": sum(v["open_breached"] for v in by_priority.values()),
+    }
+
+    return {
+        "overall": _summarize(overall_counts),
+        "by_priority": [{"priority": p, **_summarize(by_priority[p])} for p in PRIORITIES],
+    }
+
+
 def get_admin_analytics(db: Session) -> dict:
     return {
         "volume_by_category": get_volume_trends(db),
         "spikes": get_spikes(db),
         "avg_resolution_by_category": get_avg_resolution_by_category(db),
         "avg_resolution_by_priority": get_avg_resolution_by_priority(db),
+        "sla_compliance": get_sla_compliance(db),
     }

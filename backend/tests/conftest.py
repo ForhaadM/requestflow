@@ -1,4 +1,5 @@
 import os
+import string
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,7 +81,7 @@ def client(db_session):
 TEST_USER = {
     "name": "Test User",
     "email": "testuser@example.com",
-    "password": "testpass123",
+    "password": "Testpass123!",
 }
 
 
@@ -124,10 +125,13 @@ def make_user(client):
     def _make_user(role="requester"):
         counter["n"] += 1
         email = f"user{counter['n']}@example.com"
-        password = "password123"
+        password = "Password123!"
+        # Names must pass the letters/spaces/hyphens/apostrophes-only validator
+        # (see name_validation.py), so no digits here — use a letter suffix instead.
+        name_suffix = string.ascii_uppercase[(counter["n"] - 1) % 26]
         register_response = client.post(
             "/users",
-            json={"name": f"User {counter['n']}", "email": email, "password": password, "role": role},
+            json={"name": f"User {name_suffix}", "email": email, "password": password, "role": role},
         )
         login_response = client.post("/login", json={"email": email, "password": password})
         token = login_response.json()["access_token"]

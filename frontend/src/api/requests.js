@@ -36,3 +36,15 @@ export function unclaimRequest(token, requestId) {
 export function getRequestReviews(token, requestId) {
   return apiFetch(`/requests/${requestId}/reviews`, { token })
 }
+
+export function getRequestComments(token, requestId) {
+  return apiFetch(`/requests/${requestId}/comments`, { token })
+}
+
+export function addRequestComment(token, requestId, commentText) {
+  return apiFetch(`/requests/${requestId}/comments`, {
+    method: 'POST',
+    token,
+    body: { comment_text: commentText },
+  })
+}

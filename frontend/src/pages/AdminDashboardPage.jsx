@@ -10,8 +10,11 @@ import { PageHeader } from '../components/PageHeader'
 import { FilterDropdown } from '../components/FilterDropdown'
 import { BarChart } from '../components/BarChart'
 import { AdminAnalyticsSection } from '../components/AdminAnalyticsSection'
+import { SortableColumnHeader } from '../components/SortableColumnHeader'
 import { formatDateTime } from '../lib/formatDate'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor } from '../lib/requestTypes'
+import { priorityRank } from '../lib/priority'
+import { useColumnSort } from '../lib/useColumnSort'
 
 const STATUSES = ['open', 'in-progress', 'approved', 'rejected']
 const TYPES = REQUEST_TYPES.map((t) => t.value)
@@ -120,7 +123,7 @@ export function AdminDashboardPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [overridingId, setOverridingId] = useState(null)
 
-  useEffect(() => {
+  function load() {
     Promise.all([getAllRequests(token), getReviews(token)])
       .then(([r, rv]) => {
         setRequests(r)
@@ -128,6 +131,20 @@ export function AdminDashboardPage() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  // A request created through the chat widget (which stays mounted across
+  // navigation, unlike the New Request form's own page) broadcasts this
+  // event instead of this page having any other way to learn about it.
+  useEffect(() => {
+    window.addEventListener('requests:changed', load)
+    return () => window.removeEventListener('requests:changed', load)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   function requestTypeFor(requestId) {
@@ -137,10 +154,23 @@ export function AdminDashboardPage() {
   const byStatus = useMemo(() => tally(requests, 'status'), [requests])
   const byType = useMemo(() => tally(requests, 'request_type'), [requests])
 
-  const visibleRequests = useMemo(
+  const filteredRequests = useMemo(
     () => (statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)),
     [requests, statusFilter]
   )
+
+  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
+
+  const visibleRequests = useMemo(() => {
+    const sorted = [...filteredRequests]
+    if (activeColumn === 'priority') {
+      sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
+    } else {
+      sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    }
+    if (direction === 'desc') sorted.reverse()
+    return sorted
+  }, [filteredRequests, activeColumn, direction])
 
   function handleOverridden(requestId, review, newStatus) {
     setRequests((prev) =>
@@ -221,10 +251,22 @@ export function AdminDashboardPage() {
                 <th className="px-4 py-3">ID</th>
                 <th className="px-4 py-3">Requester</th>
                 <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Priority</th>
+                <SortableColumnHeader
+                  label="Priority"
+                  column="priority"
+                  activeColumn={activeColumn}
+                  direction={direction}
+                  onToggle={toggleColumn}
+                />
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Claimed By</th>
-                <th className="px-4 py-3">Created</th>
+                <SortableColumnHeader
+                  label="Created"
+                  column="created"
+                  activeColumn={activeColumn}
+                  direction={direction}
+                  onToggle={toggleColumn}
+                />
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>

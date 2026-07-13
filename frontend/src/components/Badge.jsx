@@ -1,5 +1,6 @@
 import { PRIORITY_LABELS } from '../lib/priority'
 import { outcomeLabel } from '../lib/requestTypes'
+import { getSlaStatus, formatSlaRemaining, formatSlaOutcome } from '../lib/sla'
 
 const STATUS_LABELS = {
   open: 'Open',
@@ -22,6 +23,12 @@ const PRIORITY_STYLES = {
   P1: 'bg-orange-50 text-orange-700 ring-orange-200',
   P2: 'bg-yellow-50 text-yellow-700 ring-yellow-200',
   P3: 'bg-slate-50 text-slate-600 ring-slate-200',
+}
+
+const SLA_STYLES = {
+  ok: 'bg-slate-50 text-slate-600 ring-slate-200',
+  warning: 'bg-amber-50 text-amber-700 ring-amber-200',
+  breached: 'bg-red-50 text-red-700 ring-red-200',
 }
 
 const DECISION_LABELS = {
@@ -59,6 +66,21 @@ export function PriorityBadge({ priority }) {
       className={PRIORITY_STYLES[priority] || PRIORITY_STYLES.P3}
     />
   )
+}
+
+// Color-coded so an approaching or breached SLA stands out at a glance in
+// the reviewer queue — the primary place this needs to be prominent.
+// `resolvedAt`, when given (a decided/closed request), switches this from a
+// live countdown to a fixed met/missed outcome as of that resolution time —
+// a completed ticket showing "3h left" would be misleading.
+export function SlaBadge({ priority, createdAt, resolvedAt }) {
+  if (resolvedAt) {
+    const { remainingMs } = getSlaStatus(priority, createdAt, new Date(resolvedAt))
+    const met = remainingMs >= 0
+    return <Badge label={formatSlaOutcome(remainingMs)} className={met ? SLA_STYLES.ok : SLA_STYLES.breached} />
+  }
+  const slaStatus = getSlaStatus(priority, createdAt)
+  return <Badge label={formatSlaRemaining(slaStatus)} className={SLA_STYLES[slaStatus.status]} />
 }
 
 export function DecisionBadge({ decision, requestType }) {

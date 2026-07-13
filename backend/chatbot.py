@@ -22,7 +22,7 @@ MAX_TOKENS = 1024
 MAX_TOOL_ITERATIONS = 4
 
 SYSTEM_PROMPT = (
-    "You are the RequestFlow assistant, embedded in an internal request management tool. "
+    "You are Flowy Assistant, embedded in RequestFlow, an internal request management tool. "
     "You help the current user create requests and check on existing ones.\n\n"
     f"Valid request_type values: {', '.join(REQUEST_TYPES)}.\n\n"
     "Priority levels (never say the internal codes to the user, just use these names): "
@@ -94,6 +94,43 @@ UNAVAILABLE_MESSAGE = (
     "The assistant is temporarily unavailable — please use the New Request form directly."
 )
 
+# Intent sent by the ChatWidget's "Create a new request" quick option. Handled
+# entirely deterministically below (no Anthropic call) so the numbered list is
+# generated straight from REQUEST_TYPES and can never drift or be hallucinated.
+CREATE_REQUEST_MENU_INTENT = "create_request_menu"
+
+
+def _pretty_type_label(request_type: str) -> str:
+    return request_type.replace("-", " ").title()
+
+
+_TYPE_MENU_LINES = "\n".join(
+    f"{i}. {_pretty_type_label(t)}" for i, t in enumerate(REQUEST_TYPES, start=1)
+)
+CREATE_REQUEST_MENU_REPLY = (
+    "Sure, what type of request do you want to create?\n\n" + _TYPE_MENU_LINES
+)
+
+
+def _parse_request_type_selection(text: str) -> str | None:
+    """Resolve a user's reply to the type menu — either a number (1-based
+    index into REQUEST_TYPES) or the type's code/pretty label, case- and
+    separator-insensitive — into a REQUEST_TYPES value. Returns None if the
+    reply doesn't match anything, so the caller can fall back to the normal
+    LLM path instead of guessing."""
+    normalized = text.strip()
+    if normalized.isdigit():
+        index = int(normalized)
+        if 1 <= index <= len(REQUEST_TYPES):
+            return REQUEST_TYPES[index - 1]
+        return None
+
+    normalized = normalized.lower().replace("-", " ").strip()
+    for request_type in REQUEST_TYPES:
+        if normalized == request_type.replace("-", " ") or normalized == _pretty_type_label(request_type).lower():
+            return request_type
+    return None
+
 
 def _serialize_request(req: Requests) -> dict:
     return {
@@ -156,17 +193,47 @@ def _run_tool(name: str, tool_input: dict, db: Session, current_user: User) -> d
     return {"error": f"Unknown tool '{name}'."}
 
 
-def run_chat(message: str, history: list[dict], db: Session, current_user: User) -> str:
-    """Send a user message through the Claude tool-use loop and return the
-    assistant's final text reply. `history` is a list of {role, content} text
-    turns supplied by the client (v1: client-side conversation state).
+def run_chat(
+    message: str,
+    history: list[dict],
+    db: Session,
+    current_user: User,
+    intent: str | None = None,
+) -> tuple[str, bool]:
+    """Send a user message through the Claude tool-use loop and return
+    (assistant's final text reply, whether a request was actually created
+    during this turn). `history` is a list of {role, content} text turns
+    supplied by the client (v1: client-side conversation state).
+
+    The `request_created` flag lets the client know to refresh any
+    request lists it has on screen (My Requests, Review Queue, ...) —
+    without it, a request created through this always-mounted widget would
+    sit unseen until the user happened to navigate/remount that page.
+
+    `intent`, when set by the client (e.g. the "Create a new request" quick
+    option), triggers a deterministic, non-LLM reply instead of a model call —
+    see CREATE_REQUEST_MENU_INTENT.
 
     If the Anthropic API fails for any reason (rate limit, out of credits,
     network error, ...), catches it and returns a friendly message instead
     of raising, so the chat widget degrades gracefully instead of hanging.
     """
+    if intent == CREATE_REQUEST_MENU_INTENT:
+        return CREATE_REQUEST_MENU_REPLY, False
+
+    # If the assistant's last turn was the type menu, try to resolve this
+    # reply as a selection ourselves (number or type name) rather than
+    # leaving the parsing to the model — deterministic and free.
+    outgoing_message = message
+    if history and history[-1].get("role") == "assistant" and history[-1].get("content") == CREATE_REQUEST_MENU_REPLY:
+        selected_type = _parse_request_type_selection(message)
+        if selected_type:
+            outgoing_message = f"I'd like to create a {_pretty_type_label(selected_type)} request."
+
     messages = [{"role": h["role"], "content": h["content"]} for h in history]
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": outgoing_message})
+
+    request_created = False
 
     try:
         response = _client.messages.create(
@@ -174,7 +241,7 @@ def run_chat(message: str, history: list[dict], db: Session, current_user: User)
         )
     except anthropic.APIError as exc:
         logger.warning("Anthropic API call failed: %s", exc)
-        return UNAVAILABLE_MESSAGE
+        return UNAVAILABLE_MESSAGE, request_created
 
     for _ in range(MAX_TOOL_ITERATIONS):
         if response.stop_reason != "tool_use":
@@ -187,6 +254,8 @@ def run_chat(message: str, history: list[dict], db: Session, current_user: User)
             if block.type != "tool_use":
                 continue
             result = _run_tool(block.name, block.input, db, current_user)
+            if block.name == "create_request" and "created" in result:
+                request_created = True
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -203,7 +272,9 @@ def run_chat(message: str, history: list[dict], db: Session, current_user: User)
             )
         except anthropic.APIError as exc:
             logger.warning("Anthropic API call failed mid-conversation: %s", exc)
-            return UNAVAILABLE_MESSAGE
+            # The tool call itself (and any request it created) already
+            # happened before this second API call failed, so still report it.
+            return UNAVAILABLE_MESSAGE, request_created
 
     reply = next((b.text for b in response.content if b.type == "text"), "")
-    return reply or "I wasn't able to come up with a response — could you rephrase that?"
+    return reply or "I wasn't able to come up with a response — could you rephrase that?", request_created

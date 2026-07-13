@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from models import User, Requests, Reviews
+from models import User, Requests, Reviews, Comments
 
 # Request types that represent an issue being fixed rather than something being
 # granted, so an "approval" means work was done and should say how.
@@ -123,3 +123,43 @@ def create_review_for_user(
     db.commit()
     db.refresh(new_review)
     return new_review
+
+
+def create_comment_for_request(db: Session, current_user: User, request_id: int, comment_text: str) -> Comments:
+    """Add a comment to a request. Only the request's own requester can add
+    one — a requester can only comment on their own requests, per the brief."""
+    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    if current_user.user_id != existing_request.requester_reference:
+        raise HTTPException(status_code=403, detail="You can only comment on your own requests.")
+
+    new_comment = Comments(
+        request_reference=request_id,
+        commenter_reference=current_user.user_id,
+        comment_text=comment_text,
+    )
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    return new_comment
+
+
+def list_comments_for_request(db: Session, current_user: User, request_id: int) -> list[Comments]:
+    """Readable by the owning requester, any reviewer, or an admin — mirrors
+    the same visibility reviewers/admins already have over the request itself
+    via GET /requests, since they need this context while working a ticket."""
+    existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+
+    is_owner = current_user.user_id == existing_request.requester_reference
+    if not (is_owner or current_user.role in ("reviewer", "admin")):
+        raise HTTPException(status_code=403, detail="Not authorized to see comments on this request.")
+
+    return (
+        db.query(Comments)
+        .filter(Comments.request_reference == request_id)
+        .order_by(Comments.created_at)
+        .all()
+    )

@@ -2,14 +2,18 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getMyRequests, getRequestReviews } from '../api/requests'
-import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
+import { StatusBadge, PriorityBadge, DecisionBadge, SlaBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
 import { PageHeader } from '../components/PageHeader'
 import { StatTile } from '../components/StatTile'
 import { EmptyState } from '../components/EmptyState'
+import { RequestComments } from '../components/RequestComments'
+import { SortableColumnHeader } from '../components/SortableColumnHeader'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
+import { priorityRank } from '../lib/priority'
+import { useColumnSort } from '../lib/useColumnSort'
 
 function ChevronIcon({ expanded }) {
   return (
@@ -35,11 +39,25 @@ export function MyRequestsPage() {
   const [reviewsById, setReviewsById] = useState({})
   const [reviewsLoading, setReviewsLoading] = useState(false)
 
-  useEffect(() => {
+  function load() {
     getMyRequests(token)
       .then(setRequests)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  // A request created through the chat widget (which stays mounted across
+  // navigation, unlike the New Request form's own page) broadcasts this
+  // event instead of this page having any other way to learn about it.
+  useEffect(() => {
+    window.addEventListener('requests:changed', load)
+    return () => window.removeEventListener('requests:changed', load)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   async function handleToggle(request) {
@@ -69,6 +87,19 @@ export function MyRequestsPage() {
     }
     return counts
   }, [requests])
+
+  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
+
+  const sortedRequests = useMemo(() => {
+    const sorted = [...requests]
+    if (activeColumn === 'priority') {
+      sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
+    } else {
+      sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    }
+    if (direction === 'desc') sorted.reverse()
+    return sorted
+  }, [requests, activeColumn, direction])
 
   return (
     <div>
@@ -105,13 +136,25 @@ export function MyRequestsPage() {
                   <th className="px-4 py-3">ID</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3">Priority</th>
+                  <SortableColumnHeader
+                    label="Priority"
+                    column="priority"
+                    activeColumn={activeColumn}
+                    direction={direction}
+                    onToggle={toggleColumn}
+                  />
                   <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Created</th>
+                  <SortableColumnHeader
+                    label="Created"
+                    column="created"
+                    activeColumn={activeColumn}
+                    direction={direction}
+                    onToggle={toggleColumn}
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {requests.map((r) => {
+                {sortedRequests.map((r) => {
                   const expanded = expandedId === r.request_id
                   const isDecided = DECIDED_STATUSES.includes(r.status)
                   return (
@@ -134,6 +177,12 @@ export function MyRequestsPage() {
                       {expanded && (
                         <tr className="bg-slate-50">
                           <td colSpan={6} className="px-4 py-4">
+                            {!isDecided && (
+                              <div className="mb-3">
+                                <SlaBadge priority={r.priority} createdAt={r.created_at} />
+                              </div>
+                            )}
+
                             {r.urgency_justification && (
                               <div className="mt-2 rounded-md bg-red-50 px-3 py-2 ring-1 ring-inset ring-red-200">
                                 <p className="text-xs font-medium text-red-700">Why this was marked Urgent</p>
@@ -164,6 +213,10 @@ export function MyRequestsPage() {
                                 ))}
                               </div>
                             )}
+
+                            <div className="mt-4 border-t border-slate-200 pt-3">
+                              <RequestComments token={token} requestId={r.request_id} canAdd />
+                            </div>
                           </td>
                         </tr>
                       )}

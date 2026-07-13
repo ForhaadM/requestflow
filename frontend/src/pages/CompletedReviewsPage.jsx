@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useUsers } from '../context/UsersContext'
 import { getAllRequests } from '../api/requests'
@@ -9,20 +9,35 @@ import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
+import { RequestDetailPanel } from '../components/RequestDetailPanel'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
 
 const FILTER_OPTIONS = ['All', 'Approved', 'Rejected']
 const FILTER_TO_DECISION = { Approved: 'APPROVED', Rejected: 'NOT APPROVED' }
 
+function ChevronIcon({ expanded }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  )
+}
+
 export function CompletedReviewsPage() {
   const { token } = useAuth()
-  const { nameFor: requesterName } = useUsers()
+  const { nameFor: requesterName, emailFor } = useUsers()
   const [reviews, setReviews] = useState([])
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('All')
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => {
     Promise.all([getReviews(token), getAllRequests(token)])
@@ -80,20 +95,47 @@ export function CompletedReviewsPage() {
               <tbody className="divide-y divide-slate-100">
                 {visibleReviews.map((rv) => {
                   const request = requestFor(rv.request_reference)
+                  const expanded = expandedId === rv.review_id
                   return (
-                    <tr key={rv.review_id}>
-                      <td className="px-4 py-3 font-medium text-slate-900">
-                        {request ? requesterName(request.requester_reference) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {request ? requestTypeLabel(request.request_type) : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <DecisionBadge decision={rv.decision} requestType={request?.request_type} />
-                      </td>
-                      <td className="max-w-xs truncate px-4 py-3 text-slate-600">{rv.comment_text || '—'}</td>
-                      <td className="px-4 py-3 text-slate-500">{formatDateTime(rv.reviewed_at)}</td>
-                    </tr>
+                    <Fragment key={rv.review_id}>
+                      <tr
+                        onClick={() => setExpandedId(expanded ? null : rv.review_id)}
+                        className="cursor-pointer hover:bg-slate-50"
+                      >
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          <span className="flex items-center gap-2">
+                            <ChevronIcon expanded={expanded} />
+                            {request ? requesterName(request.requester_reference) : '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {request ? requestTypeLabel(request.request_type) : '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <DecisionBadge decision={rv.decision} requestType={request?.request_type} />
+                        </td>
+                        <td className="max-w-xs truncate px-4 py-3 text-slate-600">{rv.comment_text || '—'}</td>
+                        <td className="px-4 py-3 text-slate-500">{formatDateTime(rv.reviewed_at)}</td>
+                      </tr>
+                      {expanded && (
+                        <tr className="bg-slate-50">
+                          <td colSpan={5} className="px-4 py-4">
+                            {request ? (
+                              <RequestDetailPanel
+                                request={request}
+                                token={token}
+                                requesterEmail={emailFor(request.requester_reference)}
+                                requesterName={requesterName(request.requester_reference)}
+                                canAddComment={false}
+                                resolvedAt={rv.reviewed_at}
+                              />
+                            ) : (
+                              <p className="text-sm text-slate-500">Request details are no longer available.</p>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
