@@ -12,7 +12,10 @@ const COMMENT_MAX_LENGTH = 750
 // viewer can only ever see their own comments (e.g. a requester on their own
 // request, who has no access to the user directory anyway), and every
 // comment is labeled "You".
-export function RequestComments({ token, requestId, canAdd, resolveAuthorName }) {
+// `extraActions` is optional — extra buttons rendered directly beside "Add
+// comment" (e.g. MyRequestsPage's "Cancel Request"), so callers that don't
+// need it don't affect the layout here.
+export function RequestComments({ token, requestId, canAdd, resolveAuthorName, extraActions }) {
   const [comments, setComments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -77,13 +80,16 @@ export function RequestComments({ token, requestId, canAdd, resolveAuthorName })
             rows={2}
             placeholder="Add a comment…"
           />
-          <button
-            type="submit"
-            disabled={submitting || !text.trim()}
-            className="mt-2 cursor-pointer rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? 'Adding…' : 'Add comment'}
-          </button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              disabled={submitting || !text.trim()}
+              className="cursor-pointer rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? 'Adding…' : 'Add comment'}
+            </button>
+            {extraActions}
+          </div>
         </form>
       )}
     </div>

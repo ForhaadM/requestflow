@@ -2,10 +2,9 @@ from datetime import datetime, timezone
 
 
 def utcnow() -> datetime:
-    """Naive UTC now — matches the naive `DateTime` columns in models.py
-    (Postgres `now()` is stored without a timezone), so this stays
-    comparable to values read back from the DB. Replaces the deprecated
-    `datetime.utcnow()`; a straight `datetime.now(timezone.utc)` would return
-    a timezone-aware value that can't be compared against those columns.
+    """Timezone-aware UTC now — matches the timezone-aware `DateTime` columns
+    in models.py (Postgres `timestamptz`, read back as tz-aware by psycopg2),
+    so this stays comparable to values read back from the DB. Replaces the
+    deprecated `datetime.utcnow()`, which returns a naive value.
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)

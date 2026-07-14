@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { getMyRequests, getRequestReviews } from '../api/requests'
+import { getMyRequests, getRequestReviews, cancelRequest } from '../api/requests'
 import { StatusBadge, PriorityBadge, DecisionBadge, SlaBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
@@ -10,6 +10,7 @@ import { StatTile } from '../components/StatTile'
 import { EmptyState } from '../components/EmptyState'
 import { RequestComments } from '../components/RequestComments'
 import { SortableColumnHeader } from '../components/SortableColumnHeader'
+import { FilterDropdown } from '../components/FilterDropdown'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
 import { priorityRank } from '../lib/priority'
@@ -29,15 +30,25 @@ function ChevronIcon({ expanded }) {
 }
 
 const DECIDED_STATUSES = ['approved', 'rejected']
+// A request can only be withdrawn while it's still unclaimed — once it's
+// in-progress a reviewer is actively working it, so cancelling out from
+// under them isn't offered. Mirrors the same rule enforced server-side in
+// cancel_request_for_user.
+const CANCELLABLE_STATUSES = ['open']
+const STATUSES = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
 
 export function MyRequestsPage() {
   const { token } = useAuth()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [expandedId, setExpandedId] = useState(null)
   const [reviewsById, setReviewsById] = useState({})
   const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [cancellingId, setCancellingId] = useState(null)
+  const [cancelSubmitting, setCancelSubmitting] = useState(false)
+  const [cancelError, setCancelError] = useState('')
 
   function load() {
     getMyRequests(token)
@@ -62,6 +73,10 @@ export function MyRequestsPage() {
 
   async function handleToggle(request) {
     const isDecided = DECIDED_STATUSES.includes(request.status)
+    // Leaving this row (or moving to a different one) shouldn't leave a
+    // "are you sure?" prompt hanging around for whichever row is expanded next.
+    setCancellingId(null)
+    setCancelError('')
     if (expandedId === request.request_id) {
       setExpandedId(null)
       return
@@ -80,6 +95,20 @@ export function MyRequestsPage() {
     }
   }
 
+  async function handleCancel(requestId) {
+    setCancelSubmitting(true)
+    setCancelError('')
+    try {
+      const updated = await cancelRequest(token, requestId)
+      setRequests((prev) => prev.map((r) => (r.request_id === requestId ? updated : r)))
+      setCancellingId(null)
+    } catch (err) {
+      setCancelError(err.message || 'Failed to cancel request')
+    } finally {
+      setCancelSubmitting(false)
+    }
+  }
+
   const statusCounts = useMemo(() => {
     const counts = { open: 0, 'in-progress': 0, approved: 0, rejected: 0 }
     for (const r of requests) {
@@ -88,10 +117,15 @@ export function MyRequestsPage() {
     return counts
   }, [requests])
 
+  const filteredRequests = useMemo(
+    () => (statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)),
+    [requests, statusFilter]
+  )
+
   const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
 
   const sortedRequests = useMemo(() => {
-    const sorted = [...requests]
+    const sorted = [...filteredRequests]
     if (activeColumn === 'priority') {
       sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
     } else {
@@ -99,7 +133,7 @@ export function MyRequestsPage() {
     }
     if (direction === 'desc') sorted.reverse()
     return sorted
-  }, [requests, activeColumn, direction])
+  }, [filteredRequests, activeColumn, direction])
 
   return (
     <div>
@@ -129,6 +163,9 @@ export function MyRequestsPage() {
               <StatTile label="Approved" value={statusCounts.approved} accent="text-emerald-600" />
               <StatTile label="Rejected" value={statusCounts.rejected} accent="text-red-600" />
             </div>
+            <div className="mb-2 flex items-center justify-end">
+              <FilterDropdown value={statusFilter} options={['all', ...STATUSES]} onChange={setStatusFilter} />
+            </div>
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -154,14 +191,23 @@ export function MyRequestsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {sortedRequests.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      No requests with this status.
+                    </td>
+                  </tr>
+                )}
                 {sortedRequests.map((r) => {
                   const expanded = expandedId === r.request_id
                   const isDecided = DECIDED_STATUSES.includes(r.status)
+                  const isCancelled = r.status === 'cancelled'
+                  const isCancelling = cancellingId === r.request_id
                   return (
                     <Fragment key={r.request_id}>
                       <tr
                         onClick={() => handleToggle(r)}
-                        className="cursor-pointer hover:bg-slate-50"
+                        className={`cursor-pointer hover:bg-slate-50 ${isCancelled ? 'line-through' : ''}`}
                       >
                         <td className="px-4 py-3 text-slate-500">
                           <span className="flex items-center gap-2">
@@ -170,14 +216,18 @@ export function MyRequestsPage() {
                         </td>
                         <td className="px-4 py-3 font-medium text-slate-900">{requestTypeLabel(r.request_type)}</td>
                         <td className="max-w-xs truncate px-4 py-3 text-slate-600">{r.description || '—'}</td>
-                        <td className="px-4 py-3"><PriorityBadge priority={r.priority} /></td>
-                        <td className="px-4 py-3"><StatusBadge status={r.status} requestType={r.request_type} /></td>
+                        <td className="px-4 py-3">
+                          <PriorityBadge priority={r.priority} strikethrough={isCancelled} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={r.status} requestType={r.request_type} strikethrough={isCancelled} />
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{formatDateTime(r.created_at)}</td>
                       </tr>
                       {expanded && (
                         <tr className="bg-slate-50">
                           <td colSpan={6} className="px-4 py-4">
-                            {!isDecided && (
+                            {!isDecided && !isCancelled && (
                               <div className="mb-3">
                                 <SlaBadge priority={r.priority} createdAt={r.created_at} />
                               </div>
@@ -190,7 +240,9 @@ export function MyRequestsPage() {
                               </div>
                             )}
 
-                            {!isDecided ? (
+                            {isCancelled ? (
+                              <p className="mt-3 text-sm text-slate-500">You cancelled this request.</p>
+                            ) : !isDecided ? (
                               <p className="mt-3 text-sm text-slate-500">
                                 No decision yet — this request is still {r.status === 'in-progress' ? 'being reviewed' : 'waiting for a reviewer'}.
                               </p>
@@ -215,7 +267,54 @@ export function MyRequestsPage() {
                             )}
 
                             <div className="mt-4 border-t border-slate-200 pt-3">
-                              <RequestComments token={token} requestId={r.request_id} canAdd />
+                              <RequestComments
+                                token={token}
+                                requestId={r.request_id}
+                                canAdd={!isCancelled}
+                                extraActions={
+                                  CANCELLABLE_STATUSES.includes(r.status) && !isCancelling && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCancelError('')
+                                        setCancellingId(r.request_id)
+                                      }}
+                                      className="cursor-pointer rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                                    >
+                                      Cancel Request
+                                    </button>
+                                  )
+                                }
+                              />
+                              {isCancelling && (
+                                <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-3">
+                                  <p className="text-sm font-medium text-red-700">
+                                    Are you sure you want to cancel this request?
+                                  </p>
+                                  <Alert>{cancelError}</Alert>
+                                  <div className="mt-2 flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCancel(r.request_id)}
+                                      disabled={cancelSubmitting}
+                                      className="cursor-pointer rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {cancelSubmitting ? 'Cancelling…' : 'Yes'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCancellingId(null)
+                                        setCancelError('')
+                                      }}
+                                      disabled={cancelSubmitting}
+                                      className="cursor-pointer rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

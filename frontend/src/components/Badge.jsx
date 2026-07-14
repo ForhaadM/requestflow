@@ -8,6 +8,7 @@ const STATUS_LABELS = {
   approved: 'Approved',
   rejected: 'Rejected',
   closed: 'Closed',
+  cancelled: 'Cancelled',
 }
 
 const STATUS_STYLES = {
@@ -16,6 +17,7 @@ const STATUS_STYLES = {
   approved: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   rejected: 'bg-red-50 text-red-700 ring-red-200',
   closed: 'bg-slate-100 text-slate-600 ring-slate-200',
+  cancelled: 'bg-slate-100 text-slate-500 ring-slate-200',
 }
 
 const PRIORITY_STYLES = {
@@ -41,29 +43,34 @@ const DECISION_STYLES = {
   'NOT APPROVED': 'bg-red-50 text-red-700 ring-red-200',
 }
 
-function Badge({ label, className }) {
+function Badge({ label, className, strikethrough }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${className}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${className} ${strikethrough ? 'line-through' : ''}`}
     >
       {label}
     </span>
   )
 }
 
-export function StatusBadge({ status, requestType }) {
+// `strikethrough` has to be applied directly on this span's own className,
+// not just on some ancestor — a badge is an atomic inline-flex box, so an
+// ancestor's line-through can't draw through it the way it does through
+// normal inline text.
+export function StatusBadge({ status, requestType, strikethrough }) {
   let label = STATUS_LABELS[status] || status
   if (requestType && (status === 'approved' || status === 'rejected')) {
     label = outcomeLabel(requestType, status === 'approved' ? 'positive' : 'negative')
   }
-  return <Badge label={label} className={STATUS_STYLES[status] || STATUS_STYLES.closed} />
+  return <Badge label={label} className={STATUS_STYLES[status] || STATUS_STYLES.closed} strikethrough={strikethrough} />
 }
 
-export function PriorityBadge({ priority }) {
+export function PriorityBadge({ priority, strikethrough }) {
   return (
     <Badge
       label={PRIORITY_LABELS[priority] || priority}
       className={PRIORITY_STYLES[priority] || PRIORITY_STYLES.P3}
+      strikethrough={strikethrough}
     />
   )
 }

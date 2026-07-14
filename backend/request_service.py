@@ -42,6 +42,33 @@ def create_request_for_user(
     return new_request
 
 
+def cancel_request_for_user(db: Session, current_user: User, request_id: int) -> Requests:
+    """Let the owning requester withdraw a request they no longer need.
+
+    Only allowed while it's still unclaimed ("open") — once it's in-progress
+    a reviewer is actively working it, and once it's been decided, cancelling
+    it would retroactively undo a decision, which is what the admin override
+    flow (create_review_for_user's is_override path) is for instead.
+    """
+    existing_request = (
+        db.query(Requests).filter(Requests.request_id == request_id).with_for_update().first()
+    )
+    if not existing_request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    if current_user.user_id != existing_request.requester_reference:
+        raise HTTPException(status_code=403, detail="You can only cancel your own requests.")
+    if existing_request.status != "open":
+        raise HTTPException(
+            status_code=400,
+            detail="Only open requests can be cancelled — an in-progress request is already being worked on.",
+        )
+
+    existing_request.status = "cancelled"
+    db.commit()
+    db.refresh(existing_request)
+    return existing_request
+
+
 def get_request_for_user(db: Session, current_user: User, request_id: int) -> Requests:
     """Fetch a request by ID, enforcing the same owner-or-admin rule as GET /requests/{id}."""
     existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
@@ -133,6 +160,8 @@ def create_comment_for_request(db: Session, current_user: User, request_id: int,
         raise HTTPException(status_code=404, detail="Request not found.")
     if current_user.user_id != existing_request.requester_reference:
         raise HTTPException(status_code=403, detail="You can only comment on your own requests.")
+    if existing_request.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Cannot comment on a cancelled request.")
 
     new_comment = Comments(
         request_reference=request_id,

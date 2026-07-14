@@ -38,7 +38,7 @@ def test_create_access_token_contains_sub_claim():
 def test_create_access_token_sets_future_expiry():
     token = create_access_token({"sub": "42"})
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    expire = datetime.fromtimestamp(payload["exp"], tz=timezone.utc).replace(tzinfo=None)
+    expire = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
     assert expire > utcnow()
     assert expire < utcnow() + timedelta(minutes=31)
 

@@ -80,6 +80,19 @@ def test_comment_on_nonexistent_request_not_found(client, auth_headers):
     assert response.status_code == 404
 
 
+def test_owner_cannot_add_comment_to_cancelled_request(client, auth_headers):
+    request_id = _create_request(client, auth_headers)
+    client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "still relevant?"}, headers=auth_headers
+    )
+    assert response.status_code == 400
+
+    list_response = client.get(f"/requests/{request_id}/comments", headers=auth_headers)
+    assert list_response.json() == []
+
+
 def test_comments_returned_in_chronological_order(client, auth_headers):
     request_id = _create_request(client, auth_headers)
     client.post(f"/requests/{request_id}/comments", json={"comment_text": "first"}, headers=auth_headers)

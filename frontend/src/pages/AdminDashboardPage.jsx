@@ -324,7 +324,7 @@ export function AdminDashboardPage() {
               <tr>
                 <th className="px-4 py-3">ID</th>
                 <th className="px-4 py-3">Request</th>
-                <th className="px-4 py-3">Reviewer</th>
+                <th className="px-4 py-3">Reviewed By</th>
                 <th className="px-4 py-3">Decision</th>
                 <th className="px-4 py-3">Comment</th>
                 <th className="px-4 py-3">Reviewed</th>

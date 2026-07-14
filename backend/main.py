@@ -11,6 +11,7 @@ from auth import hash_password, verify_password, create_access_token, get_curren
 from request_service import (
     create_request_for_user,
     get_request_for_user,
+    cancel_request_for_user,
     create_review_for_user,
     create_comment_for_request,
     list_comments_for_request,
@@ -266,6 +267,11 @@ def unclaim_request(request_id: int, db: Session = Depends(get_db), current_user
     db.commit()
     db.refresh(existing_request)
     return existing_request
+
+
+@app.patch("/requests/{request_id}/cancel")
+def cancel_request(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return cancel_request_for_user(db, current_user, request_id)
 
 
 @app.post("/reviews")

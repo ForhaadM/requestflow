@@ -115,3 +115,95 @@ def test_patch_status_forbidden_once_decided(client, auth_headers, make_user):
 
     check = client.get(f"/requests/{request_id}", headers=auth_headers)
     assert check.json()["status"] == "approved"
+
+
+def test_cancel_request_owner_can_cancel_open_request(client, auth_headers):
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    response = client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+
+def test_cancel_request_forbidden_once_in_progress(client, auth_headers, make_user):
+    # A claimed request is being actively worked on by a reviewer, so it can
+    # no longer be withdrawn out from under them — only "open" is cancellable.
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+
+    response = client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+    assert response.status_code == 400
+
+    check = client.get(f"/requests/{request_id}", headers=auth_headers)
+    assert check.json()["status"] == "in-progress"
+
+
+def test_cancel_request_not_found(client, auth_headers):
+    response = client.patch("/requests/9999/cancel", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_cancel_request_forbidden_for_other_user(client, auth_headers, make_user):
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    other = make_user(role="requester")
+    response = client.patch(f"/requests/{request_id}/cancel", headers=other["headers"])
+    assert response.status_code == 403
+
+    check = client.get(f"/requests/{request_id}", headers=auth_headers)
+    assert check.json()["status"] == "open"
+
+
+def test_cancel_request_forbidden_for_reviewer_and_admin(client, auth_headers, make_user):
+    # Cancelling is a requester-only action on their own request — a
+    # reviewer/admin trying to cancel someone else's request should be
+    # rejected the same as any other non-owner, not granted access by role.
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    admin = make_user(role="admin")
+    response = client.patch(f"/requests/{request_id}/cancel", headers=admin["headers"])
+    assert response.status_code == 403
+
+
+def test_cancel_request_forbidden_once_decided(client, auth_headers, make_user):
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    response = client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+    assert response.status_code == 400
+
+    check = client.get(f"/requests/{request_id}", headers=auth_headers)
+    assert check.json()["status"] == "approved"
+
+
+def test_cancel_request_forbidden_when_already_cancelled(client, auth_headers):
+    create_response = client.post(
+        "/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers
+    )
+    request_id = create_response.json()["request_id"]
+
+    client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+    response = client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+    assert response.status_code == 400

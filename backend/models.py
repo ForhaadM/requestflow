@@ -39,7 +39,14 @@ class Requests(Base):
     urgency_justification: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default = "open")
     claimed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # timezone=True (Postgres timestamptz): without it, the column silently
+    # truncates func.now()'s timezone-aware UTC value to a naive one on
+    # write, and the driver hands back a naive datetime on read. Pydantic
+    # then serializes that with no UTC offset/'Z' suffix, so the browser's
+    # `new Date(...)` — per the JS date-time parsing spec — treats it as
+    # local time instead of UTC, shifting every displayed timestamp by
+    # whatever the viewer's UTC offset happens to be.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
     CheckConstraint(
@@ -51,7 +58,13 @@ class Requests(Base):
     # approved/rejected) — dropped rather than left as a reachable-looking
     # but dead status. See alembic/versions for the migration that removes
     # it from the DB constraint too.
-    CheckConstraint("status IN ('open', 'in-progress', 'closed', 'approved', 'rejected')", name="requests_status_check"),
+    # "cancelled" is set only via PATCH /requests/{id}/cancel, by the owning
+    # requester, and only while the request hasn't been decided yet (see
+    # cancel_request_for_user in request_service.py).
+    CheckConstraint(
+        "status IN ('open', 'in-progress', 'closed', 'approved', 'rejected', 'cancelled')",
+        name="requests_status_check",
+    ),
 )
 
 class Reviews(Base):
@@ -62,7 +75,7 @@ class Reviews(Base):
     reviewer_reference: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     decision: Mapped[str] = mapped_column(String(50))
     comment_text: Mapped[Optional[str]] = mapped_column(Text)
-    reviewed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint("decision IN ('APPROVED', 'NOT APPROVED')"),
@@ -76,4 +89,11 @@ class Comments(Base):
     request_reference: Mapped[int] = mapped_column(ForeignKey("requests.request_id"))
     commenter_reference: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     comment_text: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # timezone=True (Postgres timestamptz): without it, the column silently
+    # truncates func.now()'s timezone-aware UTC value to a naive one on
+    # write, and the driver hands back a naive datetime on read. Pydantic
+    # then serializes that with no UTC offset/'Z' suffix, so the browser's
+    # `new Date(...)` — per the JS date-time parsing spec — treats it as
+    # local time instead of UTC, shifting every displayed timestamp by
+    # whatever the viewer's UTC offset happens to be.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

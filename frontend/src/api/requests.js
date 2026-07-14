@@ -33,6 +33,10 @@ export function unclaimRequest(token, requestId) {
   return apiFetch(`/requests/${requestId}/unclaim`, { method: 'PATCH', token })
 }
 
+export function cancelRequest(token, requestId) {
+  return apiFetch(`/requests/${requestId}/cancel`, { method: 'PATCH', token })
+}
+
 export function getRequestReviews(token, requestId) {
   return apiFetch(`/requests/${requestId}/reviews`, { token })
 }
