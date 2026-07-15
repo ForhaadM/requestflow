@@ -181,8 +181,25 @@ requestFlow/
 
 ## Screenshots
 
-*(Coming soon — login, request submission, reviewer queue, admin dashboard)*
+**Login / Registration** — real-time password requirements checklist
+![Login page](docs/screenshots/register.png)
 
+**New Request** — proactive duplicate detection
+![New request form](docs/screenshots/request.png)
+
+**My Requests** — SLA countdown, urgency justification, and comments
+![My requests page](docs/screenshots/request.png)
+
+**Flowy Assistant** — AI-guided request creation
+![Chatbot main menu](docs/screenshots/flowy1.png)
+![Chatbot creating a request](docs/screenshots/flowy2.png)
+
+**Reviewer Queue** — SLA badges and requester contact info
+![Reviewer queue](docs/screenshots/reviewer.png)
+
+**Admin Dashboard** — analytics, volume trends, and SLA compliance
+![Admin dashboard overview](docs/screenshots/admin1.png)
+![Admin dashboard SLA compliance](docs/screenshots/admin2.png)
 ## Future Enhancements
 
 - ~~Conversational agent for guided request submission via natural-language Q&A~~ — done, see [Features](#features)
