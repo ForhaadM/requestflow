@@ -8,19 +8,22 @@ A full-stack internal request management system for tracking approvals, reviews,
 
 ## Overview / Problem Statement
 
-Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow, including a conditional business rule requiring justification on rejected requests, and a full audit trail of who reviewed what and when.
+Internal teams routinely need a way to submit requests (access, hardware, software, bug reports), route them to the right reviewer, and track their status from submission to resolution. RequestFlow models this end-to-end workflow, including a conditional business rule requiring justification on rejected requests, SLA deadlines by priority, and a full audit trail of who reviewed what and when.
 
 This project was built to demonstrate both software engineering skills (schema design, REST API development, authentication, containerization, cloud deployment) and business analysis skills (requirements modeling, workflow design, deliberate scoping decisions) relevant to both SWE and BA roles.
 
 ## Features
 
 - **Request submission** — requesters submit categorized requests (access, hardware, software, bug report, and more) with a priority level
+- **Request comments** — requesters can add follow-up comments to their own existing requests (e.g. to add info they forgot), with a 750-character limit
+- **Request cancellation** — a requester can withdraw their own open request, tracked distinctly from reviewer-driven closures
 - **Review workflow** — reviewers claim, then approve or reject requests; rejections (and any override of a prior decision) require a written justification, enforced at the application layer
+- **SLA tracking** — deadlines computed from priority (Urgent: 2h, High: 12h, Medium: 7d, Low: 2wk from creation), surfaced differently per role: a live countdown badge for reviewers, deadline visibility for requesters, and aggregate compliance stats on the admin dashboard
 - **Role-based access** — requester, reviewer, and admin roles with distinct permissions
 - **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input; login is rate-limited to slow down brute-force attempts
-- **AI chatbot assistant** — a chat widget (Claude, tool-calling) lets requesters create requests and check on existing ones conversationally; degrades gracefully to a "use the form instead" message if the Anthropic API is unavailable
+- **AI chatbot assistant ("Flowy Assistant")** — a chat widget (Claude, tool-calling), scoped to the requester role, guides users through creating a request conversationally or answers general questions about request types; supports cancelling out of the guided flow at any point via button or natural language ("nevermind," "cancel," etc.); degrades gracefully to a "use the form instead" message if the Anthropic API is unavailable
 - **Proactive duplicate detection** — before a request is created (via the form or the chatbot), it's checked against the requester's own open/in-progress requests and flagged if it looks like a likely duplicate
-- **Admin analytics dashboard** — volume trends by category, unusual-activity spikes, and average time-to-resolution by category/priority
+- **Admin analytics dashboard** — volume trends by category, unusual-activity spikes, average time-to-resolution, and SLA compliance, all by category/priority
 - **Admin dashboard** — full visibility into all requests and reviews across the system, plus the ability to override a previous decision
 - **Audit trail** — every review is its own timestamped record tied to the reviewer and the request
 
@@ -37,7 +40,7 @@ This project was built to demonstrate both software engineering skills (schema d
 
 ## Data Model / Architecture
 
-Three core entities: `users`, `requests`, and `reviews`.
+Four core entities: `users`, `requests`, `reviews`, and `comments`.
 
 ```
 users                      requests                    reviews
@@ -50,15 +53,26 @@ role                 │     priority                │     comment_text
 │     urgency_justification    │     reviewed_at
 │     status                  │
 │     claimed_by (FK)          │
-│     created_at               │
-└──────────────────────────────┘
+│     created_at (tz-aware)     │
+└──────┬───────────────────────┘
+│
+▼
+comments
+────────
+comment_id (PK)
+request_reference (FK)
+commenter_reference (FK)
+comment_text
+created_at (tz-aware)
 ```
 
 **Key design decisions:**
 - **Reviews are a separate table, not a status column on requests** — a review is a distinct event with its own actor and timestamp, not a fixed attribute of a request. This also allows the audit trail to show *who* reviewed *what* and *when*, independent of the request itself.
+- **Comments are a separate table**, following the same reasoning — a request can accumulate multiple comments over time, each with its own author and timestamp.
 - **Roles live in a single `users` table with a `role` column**, rather than separate tables per role — all users share the same core attributes (name, email, password), and role is just a classification, not a structurally different entity.
 - **Comment justification on rejection is enforced in application logic, not a database constraint** — this is a conditional rule (required only when `decision = 'NOT APPROVED'`) that depends on the relationship between two columns, which a simple `CHECK` constraint can't express cleanly. The database still enforces `NOT NULL`/`CHECK` constraints for everything that *is* a fixed, structural rule (foreign keys, allowed enum values).
-- **Status is system-controlled, not client-controlled** — a request always starts at `open` via the database default; every subsequent transition goes through a role-checked route (claim, unclaim, review decision, or a direct status update), and a request that's already been `approved`/`rejected` can only change via the review-override flow (admin-only, comment required) — never by a raw client-supplied status.
+- **Status is system-controlled, not client-controlled** — a request always starts at `open` via the database default; every subsequent transition goes through a role-checked route (claim, unclaim, review decision, cancellation, or a direct status update), and a request that's already been `approved`/`rejected` can only change via the review-override flow (admin-only, comment required) — never by a raw client-supplied status.
+- **Timestamps are timezone-aware (`timestamptz`), not naive** — an earlier version used naive `timestamp` columns, which caused the browser to misinterpret UTC values as local time, silently shifting every displayed timestamp by the viewer's UTC offset. Migrated affected columns after confirming the database session's timezone was UTC throughout, making the conversion lossless.
 
 ## Live Deployment
 
@@ -120,7 +134,7 @@ alembic upgrade head
 **Making a schema change:**
 1. Edit `backend/models.py`
 2. Generate a migration from the diff: `alembic revision --autogenerate -m "short description"`
-3. **Review the generated file in `backend/alembic/versions/`** — autogenerate is a starting point, not a guarantee (e.g. it doesn't detect column renames)
+3. **Review the generated file in `backend/alembic/versions/`** — autogenerate is a starting point, not a guarantee (e.g. it doesn't detect column renames, and won't know if a type/nullability change is actually safe against existing data)
 4. Apply it locally: `alembic upgrade head`
 5. Commit the migration file alongside the model change
 
@@ -129,7 +143,6 @@ Schema changes should **always** go through this workflow now — not manual `AL
 **CI enforces this automatically:** every push/PR runs `alembic upgrade head` followed by `alembic check` against a real Postgres instance, which fails the build if `models.py` and the migration history have diverged — so a forgotten migration is caught in CI instead of surfacing as a drift incident in production again.
 
 ## Project Structure
-
 ```
 requestFlow/
 ├── backend/
@@ -139,11 +152,14 @@ requestFlow/
 │   ├── auth.py                 # Password hashing, JWT, auth dependency
 │   ├── request_service.py      # Request/review business logic shared by routes + chatbot tools
 │   ├── chat.py                 # /chat route
-│   ├── chatbot.py              # Claude tool-calling loop (create/check requests)
+│   ├── chatbot.py              # Claude tool-calling loop (create/check requests, cancel flow)
 │   ├── duplicate_detection.py  # Proactive duplicate-check (Claude classification)
-│   ├── analytics.py            # Admin analytics aggregation
+│   ├── analytics.py            # Admin analytics aggregation, SLA compliance
+│   ├── sla.py                  # SLA deadline computation by priority
 │   ├── rate_limit.py           # In-memory per-process rate limiting
-│   ├── timeutils.py            # Naive-UTC now() helper
+│   ├── timeutils.py            # Timezone-aware now() helper
+│   ├── name_validation.py      # Registration name format validation
+│   ├── password_rules.py       # Shared password requirement rules (client + server)
 │   ├── alembic/                # Database migration scripts (env.py, versions/)
 │   ├── alembic.ini
 │   ├── Dockerfile
@@ -155,6 +171,7 @@ requestFlow/
 │   │   ├── components/  # Shared UI components
 │   │   ├── api/         # API client functions
 │   │   ├── context/     # Auth + shared user-directory state
+│   │   ├── lib/         # Client-side validation, SLA, sorting, nav-visibility utilities
 │   │   └── test/        # Vitest setup
 │   └── package.json
 ├── .github/workflows/ci.yml    # CI pipeline (backend tests + migration check, frontend tests + build)
@@ -172,12 +189,16 @@ requestFlow/
 - ~~Proactive duplicate detection~~ — done, see [Features](#features)
 - ~~Admin analytics dashboard~~ — done, see [Features](#features)
 - ~~Database migrations (Alembic)~~ — done. A real schema-drift incident (columns in `models.py` missing from production, caused by manual `ALTER TABLE` statements) motivated adopting Alembic; see [Database Migrations](#database-migrations)
+- ~~SLA tracking~~ — done, see [Features](#features)
+- ~~Request comments~~ — done, see [Features](#features)
+- **Live queue updates** — list views (reviewer queue, admin dashboard, my requests) fetch once on page load; a request created elsewhere (e.g. via the chatbot, or by another user) doesn't appear until the page is refreshed. Polling or a WebSocket/SSE-based live-update mechanism is the natural next step — deliberately deferred as a v1 scoping decision given the added infrastructure complexity, not an oversight.
 - **Invite/approval-based role assignment** — registration currently lets anyone self-select `requester`/`reviewer`/`admin` at signup (`RegisterPage.jsx`), which is intentional for a portfolio demo ("pick the role you want to demo") but is the first thing to change before this touches anything real
 - **Shared-store rate limiting** — login/chat/duplicate-check are rate-limited (`rate_limit.py`), but the limiter is in-memory and per-process, so it only holds under a single backend instance; a multi-instance deployment needs a shared store (e.g. Redis) instead
 - Audit history table tracking full status-change history per request (currently only the terminal decision is recorded)
 - Auto-scaling / multi-AZ for the backend and database (currently single-instance, appropriate for a portfolio project but a documented gap versus production-grade HA)
+- Reviewer/admin-specific chatbot capabilities (e.g. natural-language queue queries for reviewers, natural-language analytics queries for admins) — the chatbot is currently scoped to the requester role only, since its existing capabilities (request creation, status Q&A) have no real use case for the other two roles
 
 ## Author / Contact
 
 Forhaad Miah
-[LinkedIn](https://linkedin.com/in/forhaad-miah) · [GitHub](https://github.com/ForhaadM) · [Portfolio](https://forhaadm.github.io/ASWeb)
+[LinkedIn](https://linkedin.com/in/forhaad-miah) · [GitHub](https://github.com/ForhaadM) 
