@@ -218,5 +218,5 @@ requestFlow/
 
 ## Author / Contact
 
-Forhaad Miah
+Forhaad Miah |
 [LinkedIn](https://linkedin.com/in/forhaad-miah) · [GitHub](https://github.com/ForhaadM) 
