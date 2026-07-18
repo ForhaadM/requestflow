@@ -11,10 +11,24 @@ import { FilterDropdown } from '../components/FilterDropdown'
 import { BarChart } from '../components/BarChart'
 import { AdminAnalyticsSection } from '../components/AdminAnalyticsSection'
 import { SortableColumnHeader } from '../components/SortableColumnHeader'
+import { RequestDetailPanel } from '../components/RequestDetailPanel'
 import { formatDateTime } from '../lib/formatDate'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor } from '../lib/requestTypes'
 import { priorityRank } from '../lib/priority'
 import { useColumnSort } from '../lib/useColumnSort'
+
+function ChevronIcon({ expanded }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  )
+}
 
 const STATUSES = ['open', 'in-progress', 'approved', 'rejected']
 const TYPES = REQUEST_TYPES.map((t) => t.value)
@@ -114,14 +128,16 @@ function OverrideRow({ request, token, onOverridden, onCancel }) {
 }
 
 export function AdminDashboardPage() {
-  const { token } = useAuth()
-  const { nameFor } = useUsers()
+  const { token, user } = useAuth()
+  const { nameFor, emailFor } = useUsers()
   const [requests, setRequests] = useState([])
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [overridingId, setOverridingId] = useState(null)
+  const [expandedRequestId, setExpandedRequestId] = useState(null)
+  const [expandedReviewId, setExpandedReviewId] = useState(null)
 
   function load() {
     Promise.all([getAllRequests(token), getReviews(token)])
@@ -149,6 +165,10 @@ export function AdminDashboardPage() {
 
   function requestTypeFor(requestId) {
     return requests.find((r) => r.request_id === requestId)?.request_type
+  }
+
+  function requestFor(requestId) {
+    return requests.find((r) => r.request_id === requestId)
   }
 
   const byStatus = useMemo(() => tally(requests, 'status'), [requests])
@@ -245,7 +265,7 @@ export function AdminDashboardPage() {
         </div>
 
         <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+          <table data-testid="all-requests-table" className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">ID</th>
@@ -278,39 +298,69 @@ export function AdminDashboardPage() {
                   </td>
                 </tr>
               )}
-              {visibleRequests.map((r) => (
-                <Fragment key={r.request_id}>
-                  <tr>
-                    <td className="px-4 py-3 text-slate-500">#{r.request_id}</td>
-                    <td className="px-4 py-3 text-slate-600">{nameFor(r.requester_reference)}</td>
-                    <td className="px-4 py-3 font-medium text-slate-900">{requestTypeLabel(r.request_type)}</td>
-                    <td className="px-4 py-3"><PriorityBadge priority={r.priority} /></td>
-                    <td className="px-4 py-3"><StatusBadge status={r.status} requestType={r.request_type} /></td>
-                    <td className="px-4 py-3 text-slate-500">
-                      {r.claimed_by ? nameFor(r.claimed_by) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{formatDateTime(r.created_at)}</td>
-                    <td className="px-4 py-3">
-                      {(r.status === 'rejected' || r.status === 'approved') && (
-                        <button
-                          onClick={() => setOverridingId(overridingId === r.request_id ? null : r.request_id)}
-                          className="cursor-pointer text-sm font-medium text-indigo-600 hover:underline"
-                        >
-                          {r.status === 'rejected' ? 'Override rejection' : 'Reverse decision'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  {overridingId === r.request_id && (
-                    <OverrideRow
-                      request={r}
-                      token={token}
-                      onOverridden={handleOverridden}
-                      onCancel={() => setOverridingId(null)}
-                    />
-                  )}
-                </Fragment>
-              ))}
+              {visibleRequests.map((r) => {
+                const expanded = expandedRequestId === r.request_id
+                return (
+                  <Fragment key={r.request_id}>
+                    <tr
+                      onClick={() => setExpandedRequestId(expanded ? null : r.request_id)}
+                      className="cursor-pointer hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-3 text-slate-500">
+                        <span className="flex items-center gap-2">
+                          <ChevronIcon expanded={expanded} />#{r.request_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{nameFor(r.requester_reference)}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900">{requestTypeLabel(r.request_type)}</td>
+                      <td className="px-4 py-3"><PriorityBadge priority={r.priority} /></td>
+                      <td className="px-4 py-3"><StatusBadge status={r.status} requestType={r.request_type} /></td>
+                      <td className="px-4 py-3 text-slate-500">
+                        {r.claimed_by ? nameFor(r.claimed_by) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{formatDateTime(r.created_at)}</td>
+                      <td className="px-4 py-3">
+                        {(r.status === 'rejected' || r.status === 'approved') && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOverridingId(overridingId === r.request_id ? null : r.request_id)
+                            }}
+                            className="cursor-pointer text-sm font-medium text-indigo-600 hover:underline"
+                          >
+                            {r.status === 'rejected' ? 'Override rejection' : 'Reverse decision'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expanded && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={8} className="px-4 py-4">
+                          <RequestDetailPanel
+                            request={r}
+                            token={token}
+                            requesterEmail={emailFor(r.requester_reference)}
+                            // This page is admin-only (see App.jsx), so an admin can
+                            // comment on any ticket regardless of claim status,
+                            // matching create_comment_for_request — only a cancelled
+                            // request stays locked, for everyone including admins.
+                            canAddComment={r.status !== 'cancelled'}
+                            currentUserId={user.user_id}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    {overridingId === r.request_id && (
+                      <OverrideRow
+                        request={r}
+                        token={token}
+                        onOverridden={handleOverridden}
+                        onCancel={() => setOverridingId(null)}
+                      />
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -319,7 +369,7 @@ export function AdminDashboardPage() {
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">All reviews</h2>
         <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+          <table data-testid="all-reviews-table" className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">ID</th>
@@ -331,18 +381,49 @@ export function AdminDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {reviews.map((rv) => (
-                <tr key={rv.review_id}>
-                  <td className="px-4 py-3 text-slate-500">#{rv.review_id}</td>
-                  <td className="px-4 py-3 text-slate-600">#{rv.request_reference}</td>
-                  <td className="px-4 py-3 text-slate-600">{nameFor(rv.reviewer_reference)}</td>
-                  <td className="px-4 py-3">
-                    <DecisionBadge decision={rv.decision} requestType={requestTypeFor(rv.request_reference)} />
-                  </td>
-                  <td className="max-w-xs truncate px-4 py-3 text-slate-600">{rv.comment_text || '—'}</td>
-                  <td className="px-4 py-3 text-slate-500">{formatDateTime(rv.reviewed_at)}</td>
-                </tr>
-              ))}
+              {reviews.map((rv) => {
+                const expanded = expandedReviewId === rv.review_id
+                const request = requestFor(rv.request_reference)
+                return (
+                  <Fragment key={rv.review_id}>
+                    <tr
+                      onClick={() => setExpandedReviewId(expanded ? null : rv.review_id)}
+                      className="cursor-pointer hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-3 text-slate-500">
+                        <span className="flex items-center gap-2">
+                          <ChevronIcon expanded={expanded} />#{rv.review_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">#{rv.request_reference}</td>
+                      <td className="px-4 py-3 text-slate-600">{nameFor(rv.reviewer_reference)}</td>
+                      <td className="px-4 py-3">
+                        <DecisionBadge decision={rv.decision} requestType={requestTypeFor(rv.request_reference)} />
+                      </td>
+                      <td className="max-w-xs truncate px-4 py-3 text-slate-600">{rv.comment_text || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">{formatDateTime(rv.reviewed_at)}</td>
+                    </tr>
+                    {expanded && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={6} className="px-4 py-4">
+                          {request ? (
+                            <RequestDetailPanel
+                              request={request}
+                              token={token}
+                              requesterEmail={emailFor(request.requester_reference)}
+                              canAddComment={request.status !== 'cancelled'}
+                              currentUserId={user.user_id}
+                              resolvedAt={rv.reviewed_at}
+                            />
+                          ) : (
+                            <p className="text-sm text-slate-500">Request details are no longer available.</p>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
