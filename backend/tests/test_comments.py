@@ -38,7 +38,7 @@ def test_non_owner_requester_cannot_list_comments(client, auth_headers, make_use
     assert response.status_code == 403
 
 
-def test_reviewer_can_list_but_not_add_comments(client, auth_headers, make_user):
+def test_reviewer_can_list_but_not_add_comments_when_unclaimed(client, auth_headers, make_user):
     request_id = _create_request(client, auth_headers)
     reviewer = make_user(role="reviewer")
 
@@ -51,6 +51,52 @@ def test_reviewer_can_list_but_not_add_comments(client, auth_headers, make_user)
     assert add_response.status_code == 403
 
 
+def test_claimed_reviewer_can_add_comment(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Working on this now"}, headers=reviewer["headers"]
+    )
+    assert response.status_code == 200
+    assert response.json()["comment_text"] == "Working on this now"
+
+
+def test_non_claiming_reviewer_cannot_add_comment_on_claimed_ticket(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    claimant = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=claimant["headers"])
+
+    other_reviewer = make_user(role="reviewer")
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Not my ticket"}, headers=other_reviewer["headers"]
+    )
+    assert response.status_code == 403
+
+
+def test_reviewer_loses_comment_access_after_unclaiming(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.patch(f"/requests/{request_id}/unclaim", headers=reviewer["headers"])
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Still trying"}, headers=reviewer["headers"]
+    )
+    assert response.status_code == 403
+
+
+def test_admin_can_add_comment_without_claiming(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    admin = make_user(role="admin")
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Admin note"}, headers=admin["headers"]
+    )
+    assert response.status_code == 200
+
+
 def test_admin_can_list_comments(client, auth_headers, make_user):
     request_id = _create_request(client, auth_headers)
     client.post(f"/requests/{request_id}/comments", json={"comment_text": "context"}, headers=auth_headers)
@@ -59,6 +105,80 @@ def test_admin_can_list_comments(client, auth_headers, make_user):
     response = client.get(f"/requests/{request_id}/comments", headers=admin["headers"])
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+def test_claimed_reviewer_can_comment_after_request_approved(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Following up after approval"}, headers=reviewer["headers"]
+    )
+    assert response.status_code == 200
+
+
+def test_admin_can_comment_after_request_rejected(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews",
+        json={"request_reference": request_id, "decision": "NOT APPROVED", "comment_text": "Not needed"},
+        headers=reviewer["headers"],
+    )
+
+    admin = make_user(role="admin")
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Admin follow-up"}, headers=admin["headers"]
+    )
+    assert response.status_code == 200
+
+
+def test_owner_can_comment_after_request_approved(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+    client.post(
+        "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+    )
+
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Thanks!"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+
+
+def test_comment_response_includes_commenter_name(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+
+    add_response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "Looking into it"}, headers=reviewer["headers"]
+    )
+    added_name = add_response.json()["commenter_name"]
+    assert added_name
+
+    list_response = client.get(f"/requests/{request_id}/comments", headers=auth_headers)
+    comments = list_response.json()
+    assert len(comments) == 1
+    assert comments[0]["commenter_name"] == added_name
+    assert comments[0]["commenter_reference"] == reviewer["user_id"]
+
+
+def test_admin_cannot_comment_on_cancelled_request(client, auth_headers, make_user):
+    request_id = _create_request(client, auth_headers)
+    client.patch(f"/requests/{request_id}/cancel", headers=auth_headers)
+
+    admin = make_user(role="admin")
+    response = client.post(
+        f"/requests/{request_id}/comments", json={"comment_text": "trying anyway"}, headers=admin["headers"]
+    )
+    assert response.status_code == 400
 
 
 def test_comment_over_max_length_rejected(client, auth_headers):

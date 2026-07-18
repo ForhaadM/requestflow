@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -167,6 +168,20 @@ COMMENT_TEXT_MAX_LENGTH = 750
 class CommentCreate(BaseModel):
     comment_text: str = Field(min_length=1, max_length=COMMENT_TEXT_MAX_LENGTH)
 
+# Reviewers/admins can now author comments too (see request_service.py), so
+# the viewing requester — who has no directory access (GET /users is
+# reviewer/admin-only) — needs the commenter's name in-band rather than
+# having to resolve it client-side.
+class CommentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    comment_id: int
+    request_reference: int
+    commenter_reference: int
+    commenter_name: str
+    comment_text: str
+    created_at: datetime
+
 class RoleEnum(str, Enum):
     requester = "requester"
     reviewer = "reviewer"
@@ -284,12 +299,12 @@ def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_u
         comment_text=review.comment_text,
     )
 
-@app.get("/requests/{request_id}/comments")
+@app.get("/requests/{request_id}/comments", response_model=list[CommentOut])
 def get_comments(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return list_comments_for_request(db, current_user, request_id)
 
 
-@app.post("/requests/{request_id}/comments")
+@app.post("/requests/{request_id}/comments", response_model=CommentOut)
 def add_comment(
     request_id: int,
     comment: CommentCreate,

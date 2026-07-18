@@ -38,7 +38,7 @@ const CANCELLABLE_STATUSES = ['open']
 const STATUSES = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
 
 export function MyRequestsPage() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -271,6 +271,7 @@ export function MyRequestsPage() {
                                 token={token}
                                 requestId={r.request_id}
                                 canAdd={!isCancelled}
+                                currentUserId={user.user_id}
                                 extraActions={
                                   CANCELLABLE_STATUSES.includes(r.status) && !isCancelling && (
                                     <button

@@ -153,13 +153,22 @@ def create_review_for_user(
 
 
 def create_comment_for_request(db: Session, current_user: User, request_id: int, comment_text: str) -> Comments:
-    """Add a comment to a request. Only the request's own requester can add
-    one — a requester can only comment on their own requests, per the brief."""
+    """Add a comment to a request: the owning requester, an admin (matching
+    their broader access elsewhere, e.g. unclaim_request), or the reviewer
+    currently holding the claim (claimed_by, not request status — so they
+    keep access after the ticket is approved/rejected/closed to leave a
+    follow-up, but lose it if they unclaim)."""
     existing_request = db.query(Requests).filter(Requests.request_id == request_id).first()
     if not existing_request:
         raise HTTPException(status_code=404, detail="Request not found.")
-    if current_user.user_id != existing_request.requester_reference:
-        raise HTTPException(status_code=403, detail="You can only comment on your own requests.")
+
+    is_owner = current_user.user_id == existing_request.requester_reference
+    is_admin = current_user.role == "admin"
+    is_claiming_reviewer = (
+        current_user.role == "reviewer" and current_user.user_id == existing_request.claimed_by
+    )
+    if not (is_owner or is_admin or is_claiming_reviewer):
+        raise HTTPException(status_code=403, detail="Not authorized to comment on this request.")
     if existing_request.status == "cancelled":
         raise HTTPException(status_code=400, detail="Cannot comment on a cancelled request.")
 
@@ -171,6 +180,10 @@ def create_comment_for_request(db: Session, current_user: User, request_id: int,
     db.add(new_comment)
     db.commit()
     db.refresh(new_comment)
+    # Transient, not persisted — the author is always current_user here, so
+    # no extra query is needed to know their name (see list_comments_for_request
+    # for the multi-author case, which does need one).
+    new_comment.commenter_name = current_user.name
     return new_comment
 
 
@@ -186,9 +199,23 @@ def list_comments_for_request(db: Session, current_user: User, request_id: int) 
     if not (is_owner or current_user.role in ("reviewer", "admin")):
         raise HTTPException(status_code=403, detail="Not authorized to see comments on this request.")
 
-    return (
+    comments = (
         db.query(Comments)
         .filter(Comments.request_reference == request_id)
         .order_by(Comments.created_at)
         .all()
     )
+
+    # The owning requester has no directory access (GET /users is
+    # reviewer/admin-only), so the commenter's name is resolved here and
+    # sent in-band rather than requiring the frontend to look it up.
+    if comments:
+        commenter_ids = {c.commenter_reference for c in comments}
+        names_by_id = {
+            u.user_id: u.name
+            for u in db.query(User).filter(User.user_id.in_(commenter_ids)).all()
+        }
+        for c in comments:
+            c.commenter_name = names_by_id.get(c.commenter_reference, "Unknown user")
+
+    return comments

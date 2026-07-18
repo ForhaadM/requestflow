@@ -7,11 +7,11 @@ const AuthContext = createContext(null)
 const TOKEN_KEY = 'requestflow_token'
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
+  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   // True only right after an explicit signIn() call (not when a token is
-  // restored from localStorage on page load) — lets the chat widget auto-open
+  // restored from sessionStorage on page load) — lets the chat widget auto-open
   // once per login without reopening on every navigation or page refresh.
   const [justLoggedIn, setJustLoggedIn] = useState(false)
   const navigate = useNavigate()
@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
       setUser({ user_id: profile.user_id, name: profile.name, email: profile.email, role: profile.role })
     } catch {
       // Token is invalid/expired or the backend is unreachable — treat as logged out.
-      localStorage.removeItem(TOKEN_KEY)
+      sessionStorage.removeItem(TOKEN_KEY)
       setToken(null)
       setUser(null)
     } finally {
@@ -43,7 +43,7 @@ export function AuthProvider({ children }) {
 
   async function signIn(email, password) {
     const { access_token } = await apiLogin({ email, password })
-    localStorage.setItem(TOKEN_KEY, access_token)
+    sessionStorage.setItem(TOKEN_KEY, access_token)
     setToken(access_token)
     setLoading(true)
     await loadUser(access_token)
@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
   }
 
   function signOut() {
-    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
     setJustLoggedIn(false)

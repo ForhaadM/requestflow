@@ -52,10 +52,7 @@ function RequesterEmail({ email }) {
 // Shared "full detail" view for a request — used by both the review queue
 // (open/in-progress tickets) and completed reviews, so both show identical
 // detail instead of the queue getting richer info than the completed view.
-export function RequestDetailPanel({ request, token, requesterEmail, requesterName, canAddComment, resolvedAt }) {
-  // Only the request's own requester can author a comment (see backend
-  // request_service.py), so there's only ever one possible author to resolve.
-  const resolveAuthorName = requesterName ? () => requesterName : undefined
+export function RequestDetailPanel({ request, token, requesterEmail, canAddComment, resolvedAt, currentUserId }) {
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -84,7 +81,7 @@ export function RequestDetailPanel({ request, token, requesterEmail, requesterNa
           token={token}
           requestId={request.request_id}
           canAdd={canAddComment}
-          resolveAuthorName={resolveAuthorName}
+          currentUserId={currentUserId}
         />
       </div>
     </div>

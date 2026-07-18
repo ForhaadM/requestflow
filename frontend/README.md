@@ -52,14 +52,18 @@ src/
 The backend returns a bare `access_token` from `POST /login` with no
 refresh token or `/users/me` endpoint. Given that:
 
-- **Storage**: the token is kept in `localStorage` (see
-  `context/AuthContext.jsx`). This is the pragmatic choice for a demo SPA
-  with no backend-issued httpOnly cookie option — the tradeoff is XSS
-  exposure (a cookie + `SameSite`/`HttpOnly` would be more robust against
-  that, but requires backend support that doesn't exist here). Since this
-  is a portfolio project against a trusted local backend, `localStorage`
-  keeps the auth flow simple and is the documented tradeoff, not an
-  oversight.
+- **Storage**: the token is kept in `sessionStorage` (see
+  `context/AuthContext.jsx`), scoped per-tab rather than shared across
+  every tab for the site — useful for local dev/testing, since it lets
+  different tabs stay independently signed into different accounts. The
+  tradeoff is that the session doesn't survive closing the tab (no
+  "stay logged in" across browser restarts), which is accepted here. This
+  is still a `Web Storage` choice rather than a backend-issued httpOnly
+  cookie, so the underlying XSS-exposure tradeoff also still applies (a
+  cookie + `SameSite`/`HttpOnly` would be more robust against that, but
+  requires backend support that doesn't exist here). Since this is a
+  portfolio project against a trusted local backend, this keeps the auth
+  flow simple and is a documented tradeoff, not an oversight.
 - **Who is logged in**: the JWT's `sub` claim only carries the user id, not
   name/role, and there's no `/users/me` endpoint. On login, the frontend
   decodes the JWT payload client-side to get the id, then cross-references

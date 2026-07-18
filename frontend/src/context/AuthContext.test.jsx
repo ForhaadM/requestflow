@@ -35,7 +35,7 @@ function renderWithProviders() {
 }
 
 beforeEach(() => {
-  localStorage.clear()
+  sessionStorage.clear()
   vi.clearAllMocks()
 })
 
@@ -57,7 +57,7 @@ describe('AuthContext', () => {
     fireEvent.click(screen.getByText('login'))
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('Ada Lovelace'))
-    expect(localStorage.getItem('requestflow_token')).toBe('fake-token')
+    expect(sessionStorage.getItem('requestflow_token')).toBe('fake-token')
     expect(authApi.getCurrentUser).toHaveBeenCalledWith('fake-token')
   })
 
@@ -72,23 +72,23 @@ describe('AuthContext', () => {
     fireEvent.click(screen.getByText('logout'))
 
     expect(screen.getByTestId('user')).toHaveTextContent('none')
-    expect(localStorage.getItem('requestflow_token')).toBeNull()
+    expect(sessionStorage.getItem('requestflow_token')).toBeNull()
   })
 
   it('treats a stored token that fails to resolve to a profile as logged out', async () => {
-    localStorage.setItem('requestflow_token', 'stale-token')
+    sessionStorage.setItem('requestflow_token', 'stale-token')
     authApi.getCurrentUser.mockRejectedValue(new Error('401'))
 
     renderWithProviders()
 
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
     expect(screen.getByTestId('user')).toHaveTextContent('none')
-    expect(localStorage.getItem('requestflow_token')).toBeNull()
+    expect(sessionStorage.getItem('requestflow_token')).toBeNull()
   })
 
   it('signIn sets justLoggedIn, but restoring a stored token on mount does not', async () => {
     authApi.getCurrentUser.mockResolvedValue(PROFILE)
-    localStorage.setItem('requestflow_token', 'stale-token')
+    sessionStorage.setItem('requestflow_token', 'stale-token')
 
     renderWithProviders()
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('Ada Lovelace'))
@@ -113,7 +113,7 @@ describe('AuthContext', () => {
   })
 
   it('reacts to the auth:unauthorized event (fired by apiFetch on any 401) by signing out', async () => {
-    localStorage.setItem('requestflow_token', 'good-token')
+    sessionStorage.setItem('requestflow_token', 'good-token')
     authApi.getCurrentUser.mockResolvedValue(PROFILE)
 
     renderWithProviders()
@@ -124,6 +124,6 @@ describe('AuthContext', () => {
     })
 
     expect(screen.getByTestId('user')).toHaveTextContent('none')
-    expect(localStorage.getItem('requestflow_token')).toBeNull()
+    expect(sessionStorage.getItem('requestflow_token')).toBeNull()
   })
 })

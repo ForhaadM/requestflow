@@ -150,6 +150,9 @@ function QueueRow({ request, requesterName, requesterEmail, claimantName, curren
   const isAdmin = currentUser.role === 'admin'
   const canToggle = claimed ? (isMine || isAdmin) : true
   const canDecide = claimed && (isMine || isAdmin)
+  // Comments: the claiming reviewer or an admin, matching the backend's
+  // create_comment_for_request authorization.
+  const canAddComment = isAdmin || (claimed && isMine)
 
   async function handleToggleClaim() {
     setClaimError('')
@@ -200,8 +203,8 @@ function QueueRow({ request, requesterName, requesterEmail, claimantName, curren
             request={request}
             token={token}
             requesterEmail={requesterEmail}
-            requesterName={requesterName}
-            canAddComment={false}
+            canAddComment={canAddComment}
+            currentUserId={currentUser.user_id}
           />
 
           <FadeSlide show={canDecide}>

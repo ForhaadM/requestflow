@@ -8,14 +8,15 @@ import { formatDateTime } from '../lib/formatDate'
 // Must stay in sync with COMMENT_TEXT_MAX_LENGTH in backend/main.py.
 const COMMENT_MAX_LENGTH = 750
 
-// `resolveAuthorName(commenterReference)` is optional — omit it when the
-// viewer can only ever see their own comments (e.g. a requester on their own
-// request, who has no access to the user directory anyway), and every
-// comment is labeled "You".
+// `currentUserId` is optional — pass it so the viewer's own comments are
+// labeled "You" instead of their name (every comment carries a
+// `commenter_name` from the backend now that the requester, a claiming
+// reviewer, or an admin can all author comments — see
+// request_service.py's create_comment_for_request).
 // `extraActions` is optional — extra buttons rendered directly beside "Add
 // comment" (e.g. MyRequestsPage's "Cancel Request"), so callers that don't
 // need it don't affect the layout here.
-export function RequestComments({ token, requestId, canAdd, resolveAuthorName, extraActions }) {
+export function RequestComments({ token, requestId, canAdd, currentUserId, extraActions }) {
   const [comments, setComments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -59,7 +60,7 @@ export function RequestComments({ token, requestId, canAdd, resolveAuthorName, e
             <li key={c.comment_id} className="rounded-md border border-slate-200 bg-white p-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-700">
-                  {resolveAuthorName ? resolveAuthorName(c.commenter_reference) : 'You'}
+                  {c.commenter_reference === currentUserId ? 'You' : c.commenter_name}
                 </span>
                 <span className="text-xs text-slate-400">{formatDateTime(c.created_at)}</span>
               </div>

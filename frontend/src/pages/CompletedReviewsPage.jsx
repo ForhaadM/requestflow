@@ -30,7 +30,7 @@ function ChevronIcon({ expanded }) {
 }
 
 export function CompletedReviewsPage() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const { nameFor: requesterName, emailFor } = useUsers()
   const [reviews, setReviews] = useState([])
   const [requests, setRequests] = useState([])
@@ -125,8 +125,12 @@ export function CompletedReviewsPage() {
                                 request={request}
                                 token={token}
                                 requesterEmail={emailFor(request.requester_reference)}
-                                requesterName={requesterName(request.requester_reference)}
-                                canAddComment={false}
+                                // This route is reviewer-only (see App.jsx), so admin
+                                // isn't a case here — just whether this viewer still
+                                // holds the claim, matching the backend's
+                                // create_comment_for_request authorization.
+                                canAddComment={request.claimed_by === user.user_id}
+                                currentUserId={user.user_id}
                                 resolvedAt={rv.reviewed_at}
                               />
                             ) : (
