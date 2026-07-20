@@ -92,7 +92,7 @@ jobs:
         run: npm run build
         working-directory: frontend
 
-deploy-backend:
+  deploy-backend:
     name: Deploy backend to EC2
     runs-on: ubuntu-latest
     needs: backend
@@ -116,8 +116,9 @@ deploy-backend:
             docker stop requestflow-api
             docker rm requestflow-api
             docker run -d --restart unless-stopped --env-file .env -p 8000:8000 --name requestflow-api requestflow-backend
-  
-deploy-frontend:
+            curl -f http://localhost:8000/health
+
+  deploy-frontend:
     name: Deploy frontend
     runs-on: ubuntu-latest
     needs: frontend
@@ -127,18 +128,31 @@ deploy-frontend:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Deploy via AWS CLI
-        uses: aws-actions/configure-aws-credentials
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            git checkout
-            
-            npm install requirements.txt
-            npm run build
-            
-            aws s3 sync
-            
-  
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Sync to S3
+        run: aws s3 sync dist/ s3://requestflow-frontend-forhaadm --delete
+        working-directory: frontend
+
+      - name: Create CloudFront Invalidation
+        run: aws cloudfront create-invalidation --distribution-id E1OXKWOOUBOETG --paths "/*"
