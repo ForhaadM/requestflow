@@ -18,21 +18,22 @@ This project was built to demonstrate both software engineering skills (schema d
 - **Request comments** — requesters can add follow-up comments to their own existing requests (e.g. to add info they forgot), with a 750-character limit
 - **Request cancellation** — a requester can withdraw their own open request, tracked distinctly from reviewer-driven closures
 - **Review workflow** — reviewers claim, then approve or reject requests; rejections (and any override of a prior decision) require a written justification, enforced at the application layer
-- **SLA tracking** — deadlines computed from priority (Urgent: 2h, High: 12h, Medium: 7d, Low: 2wk from creation), surfaced differently per role: a live countdown badge for reviewers, deadline visibility for requesters, and aggregate compliance stats on the admin dashboard
+- **SLA tracking** — deadlines computed from priority (Urgent: 2h, High: 12h, Medium: 7d, Low: 2wk from creation), with a live countdown badge visible to requesters, reviewers, and admins on any request detail view, plus aggregate compliance stats on the admin dashboard
 - **Role-based access** — requester, reviewer, and admin roles with distinct permissions
 - **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input; login is rate-limited to slow down brute-force attempts
 - **AI chatbot assistant ("Flowy Assistant")** — a chat widget (Claude, tool-calling), scoped to the requester role, guides users through creating a request conversationally or answers general questions about request types; supports cancelling out of the guided flow at any point via button or natural language ("nevermind," "cancel," etc.); degrades gracefully to a "use the form instead" message if the Anthropic API is unavailable
 - **Proactive duplicate detection** — before a request is created (via the form or the chatbot), it's checked against the requester's own open/in-progress requests and flagged if it looks like a likely duplicate
 - **Admin analytics dashboard** — volume trends by category, unusual-activity spikes, average time-to-resolution, and SLA compliance, all by category/priority
-- **Admin dashboard** — full visibility into all requests and reviews across the system, plus the ability to override a previous decision
+- **Admin dashboard** — full visibility into all requests and reviews across the system, with the same expandable detail view available to requesters and reviewers, plus the ability to comment on any ticket and override a previous decision
 - **Audit trail** — every review is its own timestamped record tied to the reviewer and the request
+- **Threaded comments with role-aware access** — requesters can comment on their own requests; the reviewer currently holding a claim, or any admin, can also reply — even after a ticket is closed. Comments always show the real commenter's name, not just "you."
 
 ## Tech Stack
 
 - **Backend:** FastAPI, SQLAlchemy 2.0
 - **Database:** PostgreSQL
 - **Frontend:** React, Vite, Tailwind CSS
-- **Auth:** JWT (python-jose), bcrypt (passlib)
+- **Authentication** — JWT-based auth with bcrypt password hashing; identity for all actions is derived from a verified token, never from client-supplied input; the token is stored in `sessionStorage` (scoped per-tab, cleared on tab close) rather than `localStorage`; login is rate-limited to slow down brute-force attempts
 - **AI:** Anthropic Claude API (chatbot tool-calling, duplicate-detection classification)
 - **Testing:** pytest + FastAPI TestClient (backend), Vitest + React Testing Library (frontend)
 - **Infra:** Docker, Docker Compose, GitHub Actions (CI/CD)
@@ -217,5 +218,5 @@ requestFlow/
 
 ## Author / Contact
 
-Forhaad Miah
+Forhaad Miah |
 [LinkedIn](https://linkedin.com/in/forhaad-miah) · [GitHub](https://github.com/ForhaadM) 
