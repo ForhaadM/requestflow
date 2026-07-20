@@ -1,16 +1,13 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: postgres:16
@@ -25,7 +22,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
       POSTGRES_USER: requestflow_ci
       POSTGRES_PASSWORD: requestflow_ci_pw
@@ -33,126 +29,107 @@ jobs:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
-
       - name: Install backend dependencies
         run: pip install -r requirements.txt
         working-directory: backend
-
       - name: Apply DB migrations
         run: alembic upgrade head
         working-directory: backend
-
       - name: Check models.py matches the migration history (fails on schema drift)
         run: alembic check
         working-directory: backend
-
       - name: Run pytest suite
         run: pytest -v
         working-directory: backend
-
   frontend:
     name: Frontend (build & lint)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
-
       - name: Lint
         run: npm run lint
         working-directory: frontend
-
       - name: Run frontend tests
         run: npm test
         working-directory: frontend
-
       - name: Build
         run: npm run build
         working-directory: frontend
-
   deploy-backend:
     name: Deploy backend to EC2
     runs-on: ubuntu-latest
     needs: backend
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd requestflow
-            git pull
-            cd backend
-            docker build -t requestflow-backend .
-            docker stop requestflow-api
-            docker rm requestflow-api
-            docker run -d --restart unless-stopped --env-file .env -p 8000:8000 --name requestflow-api requestflow-backend
-            curl -f http://localhost:8000/health
-
-  deploy-frontend:
-    name: Deploy frontend
-    runs-on: ubuntu-latest
-    needs: frontend
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build
-        run: npm run build
-        working-directory: frontend
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
+      - name: Deploy via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd /home/ec2-user/requestflow",
+              "git pull",
+              "cd backend",
+              "docker build -t requestflow-backend .",
+              "docker stop requestflow-api",
+              "docker rm requestflow-api",
+              "docker run -d --restart unless-stopped --env-file .env -p 8000:8000 --name requestflow-api requestflow-backend",
+              "sleep 5",
+              "curl -f http://localhost:8000/health"
+            ]'
+  deploy-frontend:
+    name: Deploy frontend
+    runs-on: ubuntu-latest
+    needs: frontend
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
       - name: Sync to S3
         run: aws s3 sync dist/ s3://requestflow-frontend-forhaadm --delete
         working-directory: frontend
-
       - name: Create CloudFront Invalidation
         run: aws cloudfront create-invalidation --distribution-id E1OXKWOOUBOETG --paths "/*"
