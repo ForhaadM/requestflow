@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from models import User, Requests, Reviews, Comments
+from email_service import send_review_decision_email
 
 # Request types that represent an issue being fixed rather than something being
 # granted, so an "approval" means work was done and should say how.
@@ -190,6 +191,24 @@ def create_review_for_user(
 
     db.commit()
     db.refresh(new_review)
+
+    # Notifying the requester is a side effect of a successful review, not
+    # part of the decision itself — any failure here (lookup or send) must
+    # never undo or fail the review that was just saved.
+    try:
+        requester = db.query(User).filter(User.user_id == existing_request.requester_reference).first()
+        send_review_decision_email(
+            to_address=requester.email,
+            request_id=existing_request.request_id,
+            request_type=existing_request.request_type,
+            description=existing_request.description,
+            priority=existing_request.priority,
+            decision=decision,
+            comment_text=comment_text,
+        )
+    except Exception as e:
+        print(f"Failed to send review decision email for request {existing_request.request_id}: {e}")
+
     return new_review
 
 

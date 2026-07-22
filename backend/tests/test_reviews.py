@@ -1,3 +1,25 @@
+from unittest.mock import patch
+
+
+def test_review_still_saves_if_email_fails(client, auth_headers, make_user):
+    create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
+    request_id = create_response.json()["request_id"]
+
+    reviewer = make_user(role="reviewer")
+    client.patch(f"/requests/{request_id}/claim", headers=reviewer["headers"])
+
+    with patch("request_service.send_review_decision_email", side_effect=Exception("boom")):
+        response = client.post(
+            "/reviews", json={"request_reference": request_id, "decision": "APPROVED"}, headers=reviewer["headers"]
+        )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "APPROVED"
+
+    get_response = client.get(f"/requests/{request_id}/reviews", headers=auth_headers)
+    assert len(get_response.json()) == 1
+
+
 def test_get_reviews_admin_sees_all(client, auth_headers, make_user):
     create_response = client.post("/requests", json={"request_type": "hardware", "description": "Test request"}, headers=auth_headers)
     request_id = create_response.json()["request_id"]

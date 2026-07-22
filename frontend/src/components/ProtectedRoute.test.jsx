@@ -14,7 +14,7 @@ function renderProtectedRoute(authState, { allowedRoles } = {}) {
   return render(
     <MemoryRouter initialEntries={['/protected']}>
       <Routes>
-        <Route path="/welcome" element={<div>welcome page</div>} />
+        <Route path="/login" element={<div>login page</div>} />
         <Route path="/" element={<div>home page</div>} />
         <Route element={<ProtectedRoute allowedRoles={allowedRoles} />}>
           <Route path="/protected" element={<div>secret content</div>} />
@@ -30,9 +30,9 @@ describe('ProtectedRoute', () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
   })
 
-  it('redirects to /welcome when there is no token', () => {
+  it('redirects to /login when there is no token', () => {
     renderProtectedRoute({ token: null, user: null, loading: false })
-    expect(screen.getByText('welcome page')).toBeInTheDocument()
+    expect(screen.getByText('login page')).toBeInTheDocument()
     expect(screen.queryByText('secret content')).not.toBeInTheDocument()
   })
 

@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getMyRequests, getRequestReviews, cancelRequest } from '../api/requests'
 import { StatusBadge, PriorityBadge, DecisionBadge, SlaBadge } from '../components/Badge'
@@ -39,6 +39,11 @@ const STATUSES = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
 
 export function MyRequestsPage() {
   const { token, user } = useAuth()
+  const { id } = useParams()
+  // /requests/:id deep-links here (e.g. from an email notification) to
+  // auto-expand one specific request; /requests/mine has no :id and this
+  // stays null, leaving the page's normal browse behavior untouched.
+  const targetRequestId = id ? Number(id) : null
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -49,6 +54,7 @@ export function MyRequestsPage() {
   const [cancellingId, setCancellingId] = useState(null)
   const [cancelSubmitting, setCancelSubmitting] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  const rowRefs = useRef({})
 
   function load() {
     getMyRequests(token)
@@ -70,6 +76,27 @@ export function MyRequestsPage() {
     return () => window.removeEventListener('requests:changed', load)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
+
+  // requests is always scoped to the current user server-side (GET
+  // /requests/me), so a :id belonging to someone else simply never shows up
+  // here — there's no separate authorization check to get wrong, and no way
+  // for this to leak whether that ID even exists.
+  const targetNotFound =
+    targetRequestId != null && !loading && !requests.some((r) => r.request_id === targetRequestId)
+
+  useEffect(() => {
+    if (targetRequestId == null || loading || expandedId === targetRequestId) return
+    const match = requests.find((r) => r.request_id === targetRequestId)
+    if (match) handleToggle(match)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetRequestId, loading, requests, expandedId])
+
+  useEffect(() => {
+    if (targetRequestId != null && expandedId === targetRequestId) {
+      // jsdom (unit tests) doesn't implement scrollIntoView at all.
+      rowRefs.current[targetRequestId]?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    }
+  }, [expandedId, targetRequestId])
 
   async function handleToggle(request) {
     const isDecided = DECIDED_STATUSES.includes(request.status)
@@ -141,6 +168,11 @@ export function MyRequestsPage() {
 
       <div className="mt-6">
         <Alert>{error}</Alert>
+        {targetNotFound && (
+          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            Request #{targetRequestId} was not found in your requests.
+          </div>
+        )}
         {loading ? (
           <Spinner />
         ) : requests.length === 0 ? (
@@ -206,6 +238,9 @@ export function MyRequestsPage() {
                   return (
                     <Fragment key={r.request_id}>
                       <tr
+                        ref={(el) => {
+                          if (el) rowRefs.current[r.request_id] = el
+                        }}
                         onClick={() => handleToggle(r)}
                         className={`cursor-pointer hover:bg-slate-50 ${isCancelled ? 'line-through' : ''}`}
                       >

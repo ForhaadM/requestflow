@@ -31,6 +31,7 @@ export default function App() {
                 <Route element={<ProtectedRoute allowedRoles={['requester', 'admin']} />}>
                   <Route path="/requests/new" element={<NewRequestPage />} />
                   <Route path="/requests/mine" element={<MyRequestsPage />} />
+                  <Route path="/requests/:id" element={<MyRequestsPage />} />
                 </Route>
 
                 <Route element={<ProtectedRoute allowedRoles={['reviewer', 'admin']} />}>
