@@ -12,8 +12,23 @@ import { PageHeader } from '../components/PageHeader'
 import { StatTile } from '../components/StatTile'
 import { EmptyState } from '../components/EmptyState'
 import { RequestDetailPanel } from '../components/RequestDetailPanel'
-import { priorityRank } from '../lib/priority'
-import { requestTypeLabel, decisionVerbsFor, requiresResolutionNotes } from '../lib/requestTypes'
+import { SearchInput } from '../components/SearchInput'
+import { MultiSelectFilter } from '../components/MultiSelectFilter'
+import { priorityRank, PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
+import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor, requiresResolutionNotes } from '../lib/requestTypes'
+
+const STATUS_OPTIONS = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
+const STATUS_LABELS = {
+  open: 'Open',
+  'in-progress': 'In Review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  cancelled: 'Cancelled',
+}
+const TYPE_OPTIONS = REQUEST_TYPES.map((t) => t.value)
+// Matches the queue's previous hardcoded behavior (only unclaimed/claimed
+// requests shown) so opening this page looks the same as before by default.
+const DEFAULT_STATUS_FILTER = ['open', 'in-progress']
 
 function ChevronIcon({ expanded }) {
   return (
@@ -181,6 +196,7 @@ function QueueRow({ request, requesterName, requesterEmail, claimantName, curren
           className="flex flex-1 cursor-pointer items-center gap-3 text-left"
         >
           <ChevronIcon expanded={expanded} />
+          <span className="text-sm text-slate-400">#{request.request_id}</span>
           <span className="text-sm font-semibold text-slate-900">{requesterName}</span>
           <span className="text-sm text-slate-500">· {requestTypeLabel(request.request_type)}</span>
         </button>
@@ -228,12 +244,21 @@ export function ReviewQueuePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState(DEFAULT_STATUS_FILTER)
+  const [priorityFilter, setPriorityFilter] = useState([])
+  const [typeFilter, setTypeFilter] = useState([])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const allRequests = await getAllRequests(token)
+      const allRequests = await getAllRequests(token, {
+        search,
+        status: statusFilter,
+        priority: priorityFilter,
+        request_type: typeFilter,
+      })
       setRequests(allRequests)
     } catch (err) {
       setError(err.message)
@@ -245,7 +270,7 @@ export function ReviewQueuePage() {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, search, statusFilter, priorityFilter, typeFilter])
 
   // A request created through the chat widget (which stays mounted across
   // navigation, unlike the New Request form's own page) broadcasts this
@@ -254,7 +279,7 @@ export function ReviewQueuePage() {
     window.addEventListener('requests:changed', load)
     return () => window.removeEventListener('requests:changed', load)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, search, statusFilter, priorityFilter, typeFilter])
 
   function handleClaimChanged(requestId, updatedRequest) {
     setRequests((prev) => prev.map((r) => (r.request_id === requestId ? updatedRequest : r)))
@@ -267,9 +292,7 @@ export function ReviewQueuePage() {
     setExpandedId(null)
   }
 
-  const queue = requests
-    .filter((r) => r.status === 'open' || r.status === 'in-progress')
-    .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
+  const queue = [...requests].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
 
   const openCount = useMemo(() => requests.filter((r) => r.status === 'open').length, [requests])
   const inProgressCount = useMemo(() => requests.filter((r) => r.status === 'in-progress').length, [requests])
@@ -293,12 +316,37 @@ export function ReviewQueuePage() {
         </div>
       )}
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        <SearchInput value={search} onSearch={setSearch} placeholder="Search by ID, requester, or description…" />
+        <MultiSelectFilter
+          label="Status"
+          value={statusFilter}
+          options={STATUS_OPTIONS}
+          optionLabel={(s) => STATUS_LABELS[s]}
+          onChange={setStatusFilter}
+        />
+        <MultiSelectFilter
+          label="Priority"
+          value={priorityFilter}
+          options={PRIORITY_ORDER}
+          optionLabel={(p) => PRIORITY_LABELS[p]}
+          onChange={setPriorityFilter}
+        />
+        <MultiSelectFilter
+          label="Type"
+          value={typeFilter}
+          options={TYPE_OPTIONS}
+          optionLabel={requestTypeLabel}
+          onChange={setTypeFilter}
+        />
+      </div>
+
+      <div className="mt-4 space-y-3">
         <Alert>{error}</Alert>
         {loading ? (
           <Spinner />
         ) : queue.length === 0 ? (
-          <EmptyState title="Nothing waiting for review right now." />
+          <EmptyState title="Nothing matches your current search and filters." />
         ) : (
           queue.map((r) => (
             <QueueRow

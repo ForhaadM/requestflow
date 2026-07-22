@@ -56,7 +56,9 @@ export function RequestDetailPanel({ request, token, requesterEmail, canAddComme
   return (
     <div>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-slate-400">Submitted {formatDateTime(request.created_at)}</p>
+        <p className="text-xs text-slate-400">
+          Request #{request.request_id} · Submitted {formatDateTime(request.created_at)}
+        </p>
         <SlaBadge priority={request.priority} createdAt={request.created_at} resolvedAt={resolvedAt} />
       </div>
 

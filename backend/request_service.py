@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from models import User, Requests, Reviews, Comments
 
@@ -77,6 +78,46 @@ def get_request_for_user(db: Session, current_user: User, request_id: int) -> Re
     if current_user.role == "admin" or current_user.user_id == existing_request.requester_reference:
         return existing_request
     raise HTTPException(status_code=403, detail="Not Authorized to see request.")
+
+
+def search_requests(
+    db: Session,
+    search: str | None = None,
+    statuses: list[str] | None = None,
+    priorities: list[str] | None = None,
+    request_types: list[str] | None = None,
+):
+    """Build the reviewer/admin "all requests" query with optional search and
+    filters applied in SQL, rather than fetching everything and filtering in
+    Python — so this scales the same way whether the caller adds LIMIT/OFFSET
+    or a cursor on top later.
+
+    `search` matches request ID (exact, only when the term is purely numeric),
+    requester name, requester email, or description (substring, case-insensitive).
+    `statuses`/`priorities`/`request_types` are separate, combinable filters —
+    each an OR across its own list, ANDed against everything else.
+    """
+    query = db.query(Requests).join(User, Requests.requester_reference == User.user_id)
+
+    term = (search or "").strip()
+    if term:
+        conditions = [
+            User.name.ilike(f"%{term}%"),
+            User.email.ilike(f"%{term}%"),
+            Requests.description.ilike(f"%{term}%"),
+        ]
+        if term.isdigit():
+            conditions.append(Requests.request_id == int(term))
+        query = query.filter(or_(*conditions))
+
+    if statuses:
+        query = query.filter(Requests.status.in_(statuses))
+    if priorities:
+        query = query.filter(Requests.priority.in_(priorities))
+    if request_types:
+        query = query.filter(Requests.request_type.in_(request_types))
+
+    return query.order_by(Requests.created_at.desc()).all()
 
 
 def create_review_for_user(

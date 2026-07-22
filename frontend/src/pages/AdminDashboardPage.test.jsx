@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AdminDashboardPage } from './AdminDashboardPage'
 import * as AuthContextModule from '../context/AuthContext'
@@ -153,6 +153,29 @@ describe('AdminDashboardPage — expandable request/review detail', () => {
     // Comment input should show — an admin can comment regardless of claim
     // status, and this ticket isn't cancelled.
     expect(screen.getByPlaceholderText('Add a comment…')).toBeInTheDocument()
+  })
+
+  it('re-fetches the "All requests" table with the search term once the debounce settles, without re-fetching the chart totals', async () => {
+    render(<AdminDashboardPage />)
+    const requestsTable = await screen.findByTestId('all-requests-table')
+    await waitFor(() => expect(within(requestsTable).getByText('#1')).toBeInTheDocument())
+
+    requestsApi.getAllRequests.mockClear()
+    const searchBox = screen.getByPlaceholderText(/search by id/i)
+    fireEvent.change(searchBox, { target: { value: 'monitor' } })
+
+    await waitFor(
+      () => {
+        expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+          'admin-token',
+          expect.objectContaining({ search: 'monitor' })
+        )
+      },
+      { timeout: 2000 }
+    )
+    // The unfiltered call (used for the by-status/by-type charts) only takes
+    // no arguments beyond the token — confirm search didn't leak into it.
+    expect(requestsApi.getAllRequests).not.toHaveBeenCalledWith('admin-token')
   })
 
   it('toggling one "All requests" row does not affect another row\'s expansion state', async () => {

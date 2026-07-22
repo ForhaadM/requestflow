@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
@@ -16,6 +16,7 @@ from request_service import (
     create_review_for_user,
     create_comment_for_request,
     list_comments_for_request,
+    search_requests,
 )
 from chat import router as chat_router
 from duplicate_detection import check_similar_requests
@@ -75,11 +76,26 @@ def get_users(db: Session = Depends(get_db), current_user: User = Depends(get_cu
     return db.query(User).order_by(User.user_id).all()
 
 @app.get("/requests")
-def get_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-
+def get_requests(
+    search: str | None = None,
+    status: list[str] | None = Query(default=None),
+    priority: list[str] | None = Query(default=None),
+    request_type: list[str] | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     if current_user.role not in ["admin", "reviewer"]:
         raise HTTPException(status_code=403,detail="Only admins or reviewers can see all requests.")
-    return db.query(Requests).order_by(Requests.created_at.desc()).all() # Show me all requests in the system (Useful for admin/reviewer)
+    # Show me all requests in the system (Useful for admin/reviewer), narrowed
+    # by optional search/filter query params — reviewer and admin share the
+    # same unscoped query, so search/filters apply identically to both.
+    return search_requests(
+        db,
+        search=search,
+        statuses=status,
+        priorities=priority,
+        request_types=request_type,
+    )
 
 
 @app.get("/reviews")

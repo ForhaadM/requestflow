@@ -21,6 +21,13 @@ beforeEach(() => {
 })
 
 describe('RequestDetailPanel', () => {
+  it('shows the request ID, since reviewer/admin views have no other consistent place to surface it', async () => {
+    render(<RequestDetailPanel request={request} token="t" canAddComment={false} currentUserId={2} />)
+    await waitFor(() => {
+      expect(screen.getByText(/Request #1/)).toBeInTheDocument()
+    })
+  })
+
   it('renders the SLA badge for a reviewer/admin viewer (per-ticket countdown, not just the requester view)', async () => {
     render(<RequestDetailPanel request={request} token="t" canAddComment={false} currentUserId={2} />)
     // SlaBadge renders a countdown/breach label sourced from lib/sla.js — assert

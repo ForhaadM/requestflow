@@ -4,9 +4,18 @@ export function getMyRequests(token) {
   return apiFetch('/requests/me', { token })
 }
 
-// Admin and reviewer only (enforced server-side).
-export function getAllRequests(token) {
-  return apiFetch('/requests', { token })
+// Admin and reviewer only (enforced server-side). `params` may include
+// `search` (string) and `status`/`priority`/`request_type` (arrays) — all
+// applied server-side so this scales the same way regardless of list size.
+export function getAllRequests(token, params = {}) {
+  const query = new URLSearchParams()
+  const { search, status, priority, request_type } = params
+  if (search && search.trim()) query.set('search', search.trim())
+  for (const s of status || []) query.append('status', s)
+  for (const p of priority || []) query.append('priority', p)
+  for (const t of request_type || []) query.append('request_type', t)
+  const qs = query.toString()
+  return apiFetch(`/requests${qs ? `?${qs}` : ''}`, { token })
 }
 
 export function createRequest(token, { request_type, description, priority, urgency_justification }) {

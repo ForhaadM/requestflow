@@ -7,14 +7,15 @@ import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
 import { PageHeader } from '../components/PageHeader'
-import { FilterDropdown } from '../components/FilterDropdown'
+import { MultiSelectFilter } from '../components/MultiSelectFilter'
+import { SearchInput } from '../components/SearchInput'
 import { BarChart } from '../components/BarChart'
 import { AdminAnalyticsSection } from '../components/AdminAnalyticsSection'
 import { SortableColumnHeader } from '../components/SortableColumnHeader'
 import { RequestDetailPanel } from '../components/RequestDetailPanel'
 import { formatDateTime } from '../lib/formatDate'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor } from '../lib/requestTypes'
-import { priorityRank } from '../lib/priority'
+import { priorityRank, PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
 import { useColumnSort } from '../lib/useColumnSort'
 
 function ChevronIcon({ expanded }) {
@@ -42,6 +43,12 @@ const STATUS_COLORS = {
   rejected: '#dc2626',
 }
 const STATUS_LABELS = { open: 'Open', 'in-progress': 'In Review', approved: 'Approved', rejected: 'Rejected' }
+
+// Includes "cancelled" (unlike STATUSES above, which is only for the
+// by-status chart) since the "All requests" table's status filter should
+// let an admin narrow to any status a request can actually be in.
+const FILTER_STATUS_OPTIONS = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
+const FILTER_STATUS_LABELS = { ...STATUS_LABELS, cancelled: 'Cancelled' }
 
 // Single hue for every bar: type is nominal (position + label already carry
 // identity), so color doesn't need to distinguish categories here.
@@ -131,14 +138,22 @@ export function AdminDashboardPage() {
   const { token, user } = useAuth()
   const { nameFor, emailFor } = useUsers()
   const [requests, setRequests] = useState([])
+  const [tableRequests, setTableRequests] = useState([])
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
+  const [tableLoading, setTableLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState([])
+  const [priorityFilter, setPriorityFilter] = useState([])
+  const [typeFilter, setTypeFilter] = useState([])
   const [overridingId, setOverridingId] = useState(null)
   const [expandedRequestId, setExpandedRequestId] = useState(null)
   const [expandedReviewId, setExpandedReviewId] = useState(null)
 
+  // The charts and "Total requests" tile above always reflect the full,
+  // unfiltered system — only the "All requests" table below is scoped by
+  // search/filters, via `tableRequests`/loadTable.
   function load() {
     Promise.all([getAllRequests(token), getReviews(token)])
       .then(([r, rv]) => {
@@ -149,19 +164,36 @@ export function AdminDashboardPage() {
       .finally(() => setLoading(false))
   }
 
+  function loadTable() {
+    setTableLoading(true)
+    getAllRequests(token, { search, status: statusFilter, priority: priorityFilter, request_type: typeFilter })
+      .then(setTableRequests)
+      .catch((err) => setError(err.message))
+      .finally(() => setTableLoading(false))
+  }
+
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
+  useEffect(() => {
+    loadTable()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, search, statusFilter, priorityFilter, typeFilter])
+
   // A request created through the chat widget (which stays mounted across
   // navigation, unlike the New Request form's own page) broadcasts this
   // event instead of this page having any other way to learn about it.
   useEffect(() => {
-    window.addEventListener('requests:changed', load)
-    return () => window.removeEventListener('requests:changed', load)
+    function handleChanged() {
+      load()
+      loadTable()
+    }
+    window.addEventListener('requests:changed', handleChanged)
+    return () => window.removeEventListener('requests:changed', handleChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, search, statusFilter, priorityFilter, typeFilter])
 
   function requestTypeFor(requestId) {
     return requests.find((r) => r.request_id === requestId)?.request_type
@@ -174,15 +206,10 @@ export function AdminDashboardPage() {
   const byStatus = useMemo(() => tally(requests, 'status'), [requests])
   const byType = useMemo(() => tally(requests, 'request_type'), [requests])
 
-  const filteredRequests = useMemo(
-    () => (statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)),
-    [requests, statusFilter]
-  )
-
   const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
 
   const visibleRequests = useMemo(() => {
-    const sorted = [...filteredRequests]
+    const sorted = [...tableRequests]
     if (activeColumn === 'priority') {
       sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
     } else {
@@ -190,10 +217,13 @@ export function AdminDashboardPage() {
     }
     if (direction === 'desc') sorted.reverse()
     return sorted
-  }, [filteredRequests, activeColumn, direction])
+  }, [tableRequests, activeColumn, direction])
 
   function handleOverridden(requestId, review, newStatus) {
     setRequests((prev) =>
+      prev.map((r) => (r.request_id === requestId ? { ...r, status: newStatus } : r))
+    )
+    setTableRequests((prev) =>
       prev.map((r) => (r.request_id === requestId ? { ...r, status: newStatus } : r))
     )
     setReviews((prev) => [...prev, review])
@@ -255,13 +285,32 @@ export function AdminDashboardPage() {
       <AdminAnalyticsSection token={token} />
 
       <section>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">All requests</h2>
-          <FilterDropdown
-            value={statusFilter}
-            options={['all', ...STATUSES]}
-            onChange={setStatusFilter}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchInput value={search} onSearch={setSearch} placeholder="Search by ID, requester, or description…" />
+            <MultiSelectFilter
+              label="Status"
+              value={statusFilter}
+              options={FILTER_STATUS_OPTIONS}
+              optionLabel={(s) => FILTER_STATUS_LABELS[s]}
+              onChange={setStatusFilter}
+            />
+            <MultiSelectFilter
+              label="Priority"
+              value={priorityFilter}
+              options={PRIORITY_ORDER}
+              optionLabel={(p) => PRIORITY_LABELS[p]}
+              onChange={setPriorityFilter}
+            />
+            <MultiSelectFilter
+              label="Type"
+              value={typeFilter}
+              options={TYPES}
+              optionLabel={requestTypeLabel}
+              onChange={setTypeFilter}
+            />
+          </div>
         </div>
 
         <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -291,14 +340,21 @@ export function AdminDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleRequests.length === 0 && (
+              {tableLoading && (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
-                    No requests with this status.
+                    <Spinner />
                   </td>
                 </tr>
               )}
-              {visibleRequests.map((r) => {
+              {!tableLoading && visibleRequests.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    No requests match your search and filters.
+                  </td>
+                </tr>
+              )}
+              {!tableLoading && visibleRequests.map((r) => {
                 const expanded = expandedRequestId === r.request_id
                 return (
                   <Fragment key={r.request_id}>
