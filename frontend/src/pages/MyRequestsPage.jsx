@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { getMyRequests, getRequestReviews, cancelRequest } from '../api/requests'
+import { getMyRequests, getMyRequestsSummary, getRequestReviews, cancelRequest } from '../api/requests'
 import { StatusBadge, PriorityBadge, DecisionBadge, SlaBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
 import { Alert } from '../components/Alert'
@@ -11,10 +11,12 @@ import { EmptyState } from '../components/EmptyState'
 import { RequestComments } from '../components/RequestComments'
 import { SortableColumnHeader } from '../components/SortableColumnHeader'
 import { FilterDropdown } from '../components/FilterDropdown'
+import { Pagination } from '../components/Pagination'
 import { formatDateTime } from '../lib/formatDate'
 import { requestTypeLabel } from '../lib/requestTypes'
-import { priorityRank } from '../lib/priority'
 import { useColumnSort } from '../lib/useColumnSort'
+
+const PAGE_SIZE = 25
 
 function ChevronIcon({ expanded }) {
   return (
@@ -45,6 +47,10 @@ export function MyRequestsPage() {
   // stays null, leaving the page's normal browse behavior untouched.
   const targetRequestId = id ? Number(id) : null
   const [requests, setRequests] = useState([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [page, setPage] = useState(1)
+  const [summary, setSummary] = useState({ total: 0, by_status: {} })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -56,31 +62,70 @@ export function MyRequestsPage() {
   const [cancelError, setCancelError] = useState('')
   const rowRefs = useRef({})
 
+  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
+
   function load() {
-    getMyRequests(token)
-      .then(setRequests)
+    setLoading(true)
+    getMyRequests(token, {
+      status: statusFilter,
+      page,
+      page_size: PAGE_SIZE,
+      sort: activeColumn,
+      sort_dir: direction,
+    })
+      .then((response) => {
+        setRequests(response.items)
+        setTotal(response.total)
+        setTotalPages(response.total_pages)
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
+  }
+
+  function loadSummary() {
+    getMyRequestsSummary(token)
+      .then(setSummary)
+      .catch((err) => setError(err.message))
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, statusFilter, activeColumn, direction, page])
+
+  useEffect(() => {
+    loadSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
+
+  // Changing the status filter or sort column should show page 1 of the new
+  // result set, not whatever page the previous view happened to be on.
+  useEffect(() => {
+    setPage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, activeColumn, direction])
 
   // A request created through the chat widget (which stays mounted across
   // navigation, unlike the New Request form's own page) broadcasts this
   // event instead of this page having any other way to learn about it.
   useEffect(() => {
-    window.addEventListener('requests:changed', load)
-    return () => window.removeEventListener('requests:changed', load)
+    function handleChanged() {
+      load()
+      loadSummary()
+    }
+    window.addEventListener('requests:changed', handleChanged)
+    return () => window.removeEventListener('requests:changed', handleChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, statusFilter, activeColumn, direction, page])
 
   // requests is always scoped to the current user server-side (GET
   // /requests/me), so a :id belonging to someone else simply never shows up
   // here — there's no separate authorization check to get wrong, and no way
-  // for this to leak whether that ID even exists.
+  // for this to leak whether that ID even exists. Note: since the list is
+  // now paginated, this only finds a target that happens to be on the
+  // current page/filter/sort — in practice a notification link almost
+  // always points at a recently created/reviewed request, which sorts onto
+  // page 1 by default.
   const targetNotFound =
     targetRequestId != null && !loading && !requests.some((r) => r.request_id === targetRequestId)
 
@@ -136,31 +181,12 @@ export function MyRequestsPage() {
     }
   }
 
-  const statusCounts = useMemo(() => {
-    const counts = { open: 0, 'in-progress': 0, approved: 0, rejected: 0 }
-    for (const r of requests) {
-      if (r.status in counts) counts[r.status] += 1
-    }
-    return counts
-  }, [requests])
-
-  const filteredRequests = useMemo(
-    () => (statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)),
-    [requests, statusFilter]
-  )
-
-  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
-
-  const sortedRequests = useMemo(() => {
-    const sorted = [...filteredRequests]
-    if (activeColumn === 'priority') {
-      sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
-    } else {
-      sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    }
-    if (direction === 'desc') sorted.reverse()
-    return sorted
-  }, [filteredRequests, activeColumn, direction])
+  const statusCounts = {
+    open: summary.by_status?.open || 0,
+    'in-progress': summary.by_status?.['in-progress'] || 0,
+    approved: summary.by_status?.approved || 0,
+    rejected: summary.by_status?.rejected || 0,
+  }
 
   return (
     <div>
@@ -175,7 +201,7 @@ export function MyRequestsPage() {
         )}
         {loading ? (
           <Spinner />
-        ) : requests.length === 0 ? (
+        ) : summary.total === 0 ? (
           <EmptyState
             title="You haven't submitted any requests yet."
             action={
@@ -223,14 +249,14 @@ export function MyRequestsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sortedRequests.length === 0 && (
+                {requests.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                       No requests with this status.
                     </td>
                   </tr>
                 )}
-                {sortedRequests.map((r) => {
+                {requests.map((r) => {
                   const expanded = expandedId === r.request_id
                   const isDecided = DECIDED_STATUSES.includes(r.status)
                   const isCancelled = r.status === 'cancelled'
@@ -360,6 +386,9 @@ export function MyRequestsPage() {
                 })}
               </tbody>
             </table>
+            {total > 0 && (
+              <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} />
+            )}
             </div>
           </>
         )}

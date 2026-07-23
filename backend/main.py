@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from database import engine, get_db
 from models import User, Requests, Reviews, Comments, REQUEST_TYPES, PRIORITIES
-from typing import Optional
+from typing import Literal, Optional
 from enum import Enum
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from request_service import (
@@ -17,6 +17,12 @@ from request_service import (
     create_comment_for_request,
     list_comments_for_request,
     search_requests,
+    list_my_requests,
+    get_requests_summary,
+    get_my_requests_summary,
+    list_reviews,
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
 )
 from chat import router as chat_router
 from duplicate_detection import check_similar_requests
@@ -57,6 +63,60 @@ class UserPublic(BaseModel):
     role: str
 
 
+class RequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    request_id: int
+    requester_reference: int
+    request_type: str
+    description: str | None
+    priority: str
+    urgency_justification: str | None
+    status: str
+    claimed_by: int | None
+    created_at: datetime
+
+
+class PaginatedRequests(BaseModel):
+    items: list[RequestOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class RequestsSummary(BaseModel):
+    total: int
+    by_status: dict[str, int]
+    by_type: dict[str, int]
+    claimed_by_me: int
+
+
+class MyRequestsSummary(BaseModel):
+    total: int
+    by_status: dict[str, int]
+
+
+class ReviewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    review_id: int
+    request_reference: int
+    reviewer_reference: int
+    decision: str
+    comment_text: str | None
+    reviewed_at: datetime
+    request: RequestOut
+
+
+class PaginatedReviews(BaseModel):
+    items: list[ReviewOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 @app.get("/users/me", response_model=UserPublic)
 def get_current_user_profile(current_user: User = Depends(get_current_user)):
     return current_user
@@ -75,12 +135,16 @@ def get_users(db: Session = Depends(get_db), current_user: User = Depends(get_cu
         raise HTTPException(status_code=403, detail="Only reviewers or admins can list all users.")
     return db.query(User).order_by(User.user_id).all()
 
-@app.get("/requests")
+@app.get("/requests", response_model=PaginatedRequests)
 def get_requests(
     search: str | None = None,
     status: list[str] | None = Query(default=None),
     priority: list[str] | None = Query(default=None),
     request_type: list[str] | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    sort: Literal["created", "priority"] = "created",
+    sort_dir: Literal["asc", "desc"] = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -95,21 +159,72 @@ def get_requests(
         statuses=status,
         priorities=priority,
         request_types=request_type,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        sort_dir=sort_dir,
     )
 
 
-@app.get("/reviews")
-def get_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role == "admin":
-        return db.query(Reviews).order_by(Reviews.reviewed_at).all()
-    elif current_user.role == "reviewer":
-        return db.query(Reviews).filter(Reviews.reviewer_reference == current_user.user_id).order_by(Reviews.reviewed_at).all()
-    else:
-        return []
+@app.get("/requests/summary", response_model=RequestsSummary)
+def get_requests_summary_route(
+    search: str | None = None,
+    priority: list[str] | None = Query(default=None),
+    request_type: list[str] | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ["admin", "reviewer"]:
+        raise HTTPException(status_code=403, detail="Only admins or reviewers can see request summaries.")
+    return get_requests_summary(
+        db,
+        current_user,
+        search=search,
+        priorities=priority,
+        request_types=request_type,
+    )
 
-@app.get("/requests/me")
-def my_requests(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(Requests).filter(Requests.requester_reference == current_user.user_id).order_by(Requests.created_at.desc()).all()
+
+@app.get("/reviews", response_model=PaginatedReviews)
+def get_reviews(
+    search: str | None = None,
+    priority: list[str] | None = Query(default=None),
+    request_type: list[str] | None = Query(default=None),
+    decision: Literal["APPROVED", "NOT APPROVED"] | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return list_reviews(
+        db,
+        current_user,
+        search=search,
+        priorities=priority,
+        request_types=request_type,
+        decision=decision,
+        page=page,
+        page_size=page_size,
+    )
+
+@app.get("/requests/me", response_model=PaginatedRequests)
+def my_requests(
+    status: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    sort: Literal["created", "priority"] = "created",
+    sort_dir: Literal["asc", "desc"] = "desc",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return list_my_requests(
+        db, current_user, status=status, page=page, page_size=page_size, sort=sort, sort_dir=sort_dir
+    )
+
+
+@app.get("/requests/me/summary", response_model=MyRequestsSummary)
+def my_requests_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return get_my_requests_summary(db, current_user)
 
 @app.get("/requests/{request_id}")
 def get_request(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useUsers } from '../context/UsersContext'
-import { getAllRequests, claimRequest, unclaimRequest } from '../api/requests'
+import { getAllRequests, getRequestsSummary, claimRequest, unclaimRequest } from '../api/requests'
 import { createReview } from '../api/reviews'
 import { PriorityBadge, SlaBadge } from '../components/Badge'
 import { ClaimToggle } from '../components/ClaimToggle'
@@ -14,9 +14,11 @@ import { EmptyState } from '../components/EmptyState'
 import { RequestDetailPanel } from '../components/RequestDetailPanel'
 import { SearchInput } from '../components/SearchInput'
 import { MultiSelectFilter } from '../components/MultiSelectFilter'
-import { priorityRank, PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
+import { Pagination } from '../components/Pagination'
+import { PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor, requiresResolutionNotes } from '../lib/requestTypes'
 
+const PAGE_SIZE = 25
 const STATUS_OPTIONS = ['open', 'in-progress', 'approved', 'rejected', 'cancelled']
 const STATUS_LABELS = {
   open: 'Open',
@@ -241,6 +243,9 @@ export function ReviewQueuePage() {
   const { token, user } = useAuth()
   const { nameFor, emailFor } = useUsers()
   const [requests, setRequests] = useState([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState(null)
@@ -248,18 +253,27 @@ export function ReviewQueuePage() {
   const [statusFilter, setStatusFilter] = useState(DEFAULT_STATUS_FILTER)
   const [priorityFilter, setPriorityFilter] = useState([])
   const [typeFilter, setTypeFilter] = useState([])
+  const [summary, setSummary] = useState({ by_status: {}, claimed_by_me: 0 })
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const allRequests = await getAllRequests(token, {
+      // Priority order is the whole point of a review queue, so it's always
+      // applied server-side here rather than being a user-toggleable column.
+      const response = await getAllRequests(token, {
         search,
         status: statusFilter,
         priority: priorityFilter,
         request_type: typeFilter,
+        page,
+        page_size: PAGE_SIZE,
+        sort: 'priority',
+        sort_dir: 'asc',
       })
-      setRequests(allRequests)
+      setRequests(response.items)
+      setTotal(response.total)
+      setTotalPages(response.total_pages)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -267,19 +281,47 @@ export function ReviewQueuePage() {
     }
   }
 
+  async function loadSummary() {
+    try {
+      // Deliberately excludes the status filter — these tiles need the true
+      // open/in-progress/mine counts regardless of which statuses the queue
+      // is currently showing.
+      const s = await getRequestsSummary(token, { search, priority: priorityFilter, request_type: typeFilter })
+      setSummary(s)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, search, statusFilter, priorityFilter, typeFilter])
+  }, [token, search, statusFilter, priorityFilter, typeFilter, page])
+
+  useEffect(() => {
+    loadSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, search, priorityFilter, typeFilter])
+
+  // Changing a filter should show page 1 of the new result set, not
+  // whatever page the previous filter happened to be on.
+  useEffect(() => {
+    setPage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter, priorityFilter, typeFilter])
 
   // A request created through the chat widget (which stays mounted across
   // navigation, unlike the New Request form's own page) broadcasts this
   // event instead of this page having any other way to learn about it.
   useEffect(() => {
-    window.addEventListener('requests:changed', load)
-    return () => window.removeEventListener('requests:changed', load)
+    function handleChanged() {
+      load()
+      loadSummary()
+    }
+    window.addEventListener('requests:changed', handleChanged)
+    return () => window.removeEventListener('requests:changed', handleChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, search, statusFilter, priorityFilter, typeFilter])
+  }, [token, search, statusFilter, priorityFilter, typeFilter, page])
 
   function handleClaimChanged(requestId, updatedRequest) {
     setRequests((prev) => prev.map((r) => (r.request_id === requestId ? updatedRequest : r)))
@@ -292,14 +334,10 @@ export function ReviewQueuePage() {
     setExpandedId(null)
   }
 
-  const queue = [...requests].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
-
-  const openCount = useMemo(() => requests.filter((r) => r.status === 'open').length, [requests])
-  const inProgressCount = useMemo(() => requests.filter((r) => r.status === 'in-progress').length, [requests])
-  const mineCount = useMemo(
-    () => requests.filter((r) => r.status === 'in-progress' && r.claimed_by === user.user_id).length,
-    [requests, user.user_id]
-  )
+  const queue = requests
+  const openCount = summary.by_status?.open || 0
+  const inProgressCount = summary.by_status?.['in-progress'] || 0
+  const mineCount = summary.claimed_by_me || 0
 
   return (
     <div>
@@ -308,7 +346,7 @@ export function ReviewQueuePage() {
         subtitle="Claim a request to review it — only the claimant (or an admin) can approve or reject it."
       />
 
-      {!loading && requests.length > 0 && (
+      {!loading && total > 0 && (
         <div className="mt-6 grid grid-cols-3 gap-3">
           <StatTile label="Unclaimed" value={openCount} accent="text-blue-600" />
           <StatTile label="In Review" value={inProgressCount} accent="text-amber-600" />
@@ -365,6 +403,12 @@ export function ReviewQueuePage() {
           ))
         )}
       </div>
+
+      {!loading && total > 0 && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} />
+        </div>
+      )}
     </div>
   )
 }

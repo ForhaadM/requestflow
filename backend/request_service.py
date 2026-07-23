@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from models import User, Requests, Reviews, Comments
 from email_service import send_review_decision_email
@@ -7,6 +7,49 @@ from email_service import send_review_decision_email
 # Request types that represent an issue being fixed rather than something being
 # granted, so an "approval" means work was done and should say how.
 ISSUE_REQUEST_TYPES = {"bug-report", "network", "facilities"}
+
+PAGE_SIZE_DEFAULT = 25
+PAGE_SIZE_MAX = 100
+
+SORT_COLUMNS = {
+    "created": Requests.created_at,
+    "priority": Requests.priority,
+}
+
+
+def _clamp_paging(page: int, page_size: int) -> tuple[int, int]:
+    return max(page, 1), min(max(page_size, 1), PAGE_SIZE_MAX)
+
+
+def _page_metadata(total: int, page: int, page_size: int) -> dict:
+    total_pages = -(-total // page_size) if total else 0
+    return {"total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
+
+
+def _paginate(query, page: int, page_size: int, sort: str, sort_dir: str) -> dict:
+    """Apply ORDER BY/OFFSET/LIMIT to an already-filtered query and shape the
+    result with the metadata the frontend needs to build pagination controls.
+
+    `total` is counted on the filtered-but-unpaginated query, so it (and the
+    derived `total_pages`) reflects the matching set, not the whole table.
+    """
+    page, page_size = _clamp_paging(page, page_size)
+
+    total = query.count()
+
+    column = SORT_COLUMNS.get(sort, Requests.created_at)
+    order = column.asc() if sort_dir == "asc" else column.desc()
+    # Tie-break on request_id (descending, i.e. newest first) so rows sharing
+    # a sort value (e.g. the same priority) still land in a stable order
+    # across pages instead of shifting around from one request to the next.
+    items = (
+        query.order_by(order, Requests.request_id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {"items": items, **_page_metadata(total, page, page_size)}
 
 
 def create_request_for_user(
@@ -81,7 +124,7 @@ def get_request_for_user(db: Session, current_user: User, request_id: int) -> Re
     raise HTTPException(status_code=403, detail="Not Authorized to see request.")
 
 
-def search_requests(
+def _filtered_requests_query(
     db: Session,
     search: str | None = None,
     statuses: list[str] | None = None,
@@ -90,8 +133,7 @@ def search_requests(
 ):
     """Build the reviewer/admin "all requests" query with optional search and
     filters applied in SQL, rather than fetching everything and filtering in
-    Python — so this scales the same way whether the caller adds LIMIT/OFFSET
-    or a cursor on top later.
+    Python — so this scales the same way regardless of table size.
 
     `search` matches request ID (exact, only when the term is purely numeric),
     requester name, requester email, or description (substring, case-insensitive).
@@ -118,7 +160,97 @@ def search_requests(
     if request_types:
         query = query.filter(Requests.request_type.in_(request_types))
 
-    return query.order_by(Requests.created_at.desc()).all()
+    return query
+
+
+def search_requests(
+    db: Session,
+    search: str | None = None,
+    statuses: list[str] | None = None,
+    priorities: list[str] | None = None,
+    request_types: list[str] | None = None,
+    page: int = 1,
+    page_size: int = PAGE_SIZE_DEFAULT,
+    sort: str = "created",
+    sort_dir: str = "desc",
+) -> dict:
+    """Paginated reviewer/admin "all requests" query — pagination and sorting
+    are applied to the filtered result set, so `total`/`total_pages` reflect
+    what search/filters actually matched, not the whole table.
+    """
+    query = _filtered_requests_query(db, search, statuses, priorities, request_types)
+    return _paginate(query, page, page_size, sort, sort_dir)
+
+
+def list_my_requests(
+    db: Session,
+    current_user: User,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = PAGE_SIZE_DEFAULT,
+    sort: str = "created",
+    sort_dir: str = "desc",
+) -> dict:
+    """Paginated version of GET /requests/me — a requester's own requests."""
+    query = db.query(Requests).filter(Requests.requester_reference == current_user.user_id)
+    if status:
+        query = query.filter(Requests.status == status)
+    return _paginate(query, page, page_size, sort, sort_dir)
+
+
+def get_my_requests_summary(db: Session, current_user: User) -> dict:
+    """Status breakdown for the current user's own requests — powers
+    MyRequestsPage's status tiles without requiring a full-table fetch now
+    that GET /requests/me is paginated."""
+    query = db.query(Requests).filter(Requests.requester_reference == current_user.user_id)
+    total = query.count()
+    by_status = dict(
+        query.with_entities(Requests.status, func.count(Requests.request_id))
+        .group_by(Requests.status)
+        .all()
+    )
+    return {"total": total, "by_status": by_status}
+
+
+def get_requests_summary(
+    db: Session,
+    current_user: User,
+    search: str | None = None,
+    priorities: list[str] | None = None,
+    request_types: list[str] | None = None,
+) -> dict:
+    """Aggregate counts for the reviewer/admin "all requests" view — powers
+    AdminDashboardPage's charts/total tile and ReviewQueuePage's stat tiles
+    without requiring a full-table fetch now that GET /requests is paginated.
+
+    Deliberately takes the same search/priority/request_type filters as
+    search_requests but not `statuses`, since the point is a breakdown *by*
+    status across whatever else is currently filtered.
+    """
+    query = _filtered_requests_query(db, search=search, priorities=priorities, request_types=request_types)
+
+    total = query.count()
+
+    by_status = dict(
+        query.with_entities(Requests.status, func.count(Requests.request_id))
+        .group_by(Requests.status)
+        .all()
+    )
+    by_type = dict(
+        query.with_entities(Requests.request_type, func.count(Requests.request_id))
+        .group_by(Requests.request_type)
+        .all()
+    )
+    claimed_by_me = query.filter(
+        Requests.status == "in-progress", Requests.claimed_by == current_user.user_id
+    ).count()
+
+    return {
+        "total": total,
+        "by_status": by_status,
+        "by_type": by_type,
+        "claimed_by_me": claimed_by_me,
+    }
 
 
 def create_review_for_user(
@@ -210,6 +342,83 @@ def create_review_for_user(
         print(f"Failed to send review decision email for request {existing_request.request_id}: {e}")
 
     return new_review
+
+
+def list_reviews(
+    db: Session,
+    current_user: User,
+    search: str | None = None,
+    priorities: list[str] | None = None,
+    request_types: list[str] | None = None,
+    decision: str | None = None,
+    page: int = 1,
+    page_size: int = PAGE_SIZE_DEFAULT,
+) -> dict:
+    """Paginated GET /reviews. Joins to Requests (and User, for search) so
+    the same search/priority/request_type filters `search_requests` supports
+    on the request side compose correctly with pagination here too — the
+    `total`/`total_pages` reflect the filtered set, not the whole table.
+
+    Role-scoped like the old unpaginated version: admins see every review,
+    reviewers see only their own decisions, requesters see none.
+
+    Each item is enriched with its associated request (a single JOIN, not a
+    per-row lookup) since callers render request details — requester,
+    description, priority, etc. — alongside every review.
+    """
+    page, page_size = _clamp_paging(page, page_size)
+
+    if current_user.role not in ("admin", "reviewer"):
+        return {"items": [], **_page_metadata(0, page, page_size)}
+
+    query = (
+        db.query(Reviews, Requests)
+        .join(Requests, Reviews.request_reference == Requests.request_id)
+        .join(User, Requests.requester_reference == User.user_id)
+    )
+    if current_user.role == "reviewer":
+        query = query.filter(Reviews.reviewer_reference == current_user.user_id)
+
+    term = (search or "").strip()
+    if term:
+        conditions = [
+            User.name.ilike(f"%{term}%"),
+            User.email.ilike(f"%{term}%"),
+            Requests.description.ilike(f"%{term}%"),
+        ]
+        if term.isdigit():
+            conditions.append(Requests.request_id == int(term))
+        query = query.filter(or_(*conditions))
+    if priorities:
+        query = query.filter(Requests.priority.in_(priorities))
+    if request_types:
+        query = query.filter(Requests.request_type.in_(request_types))
+    if decision:
+        query = query.filter(Reviews.decision == decision)
+
+    total = query.count()
+    rows = (
+        query.order_by(Reviews.reviewed_at.desc(), Reviews.review_id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for review, request in rows:
+        items.append(
+            {
+                "review_id": review.review_id,
+                "request_reference": review.request_reference,
+                "reviewer_reference": review.reviewer_reference,
+                "decision": review.decision,
+                "comment_text": review.comment_text,
+                "reviewed_at": review.reviewed_at,
+                "request": request,
+            }
+        )
+
+    return {"items": items, **_page_metadata(total, page, page_size)}
 
 
 def create_comment_for_request(db: Session, current_user: User, request_id: int, comment_text: str) -> Comments:

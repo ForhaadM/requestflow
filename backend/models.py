@@ -37,7 +37,9 @@ class Requests(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(String(20), default = "P1")
     urgency_justification: Mapped[Optional[str]] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default = "open")
+    # Indexed: filtered via .in_()/== in search_requests, list_my_requests,
+    # get_requests_summary, and analytics.py's terminal/open-status queries.
+    status: Mapped[str] = mapped_column(String(20), default = "open", index=True)
     claimed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"))
     # timezone=True (Postgres timestamptz): without it, the column silently
     # truncates func.now()'s timezone-aware UTC value to a naive one on
@@ -46,7 +48,9 @@ class Requests(Base):
     # `new Date(...)` — per the JS date-time parsing spec — treats it as
     # local time instead of UTC, shifting every displayed timestamp by
     # whatever the viewer's UTC offset happens to be.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Indexed: default ORDER BY for search_requests/list_my_requests, and
+    # analytics.py's date-range filters (volume trends, spikes).
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
     CheckConstraint(

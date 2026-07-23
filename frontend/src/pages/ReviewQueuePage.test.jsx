@@ -41,7 +41,19 @@ beforeEach(() => {
   vi.clearAllMocks()
   AuthContextModule.useAuth.mockReturnValue({ token: 'reviewer-token', user: REVIEWER })
   UsersContextModule.useUsers.mockReturnValue({ nameFor, emailFor })
-  requestsApi.getAllRequests.mockResolvedValue([OPEN_REQUEST])
+  requestsApi.getAllRequests.mockResolvedValue({
+    items: [OPEN_REQUEST],
+    total: 1,
+    page: 1,
+    page_size: 25,
+    total_pages: 1,
+  })
+  requestsApi.getRequestsSummary.mockResolvedValue({
+    total: 1,
+    by_status: { open: 1 },
+    by_type: { hardware: 1 },
+    claimed_by_me: 0,
+  })
   requestsApi.getRequestComments.mockResolvedValue([])
 })
 
@@ -73,6 +85,60 @@ describe('ReviewQueuePage', () => {
         expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
           'reviewer-token',
           expect.objectContaining({ search: 'monitor' })
+        )
+      },
+      { timeout: 2000 }
+    )
+  })
+
+  it('shows pagination controls and requests the next page on click', async () => {
+    requestsApi.getAllRequests.mockResolvedValue({
+      items: [OPEN_REQUEST],
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    render(<ReviewQueuePage />)
+    await waitFor(() => expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+
+    await waitFor(() => {
+      expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+        'reviewer-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+  })
+
+  it('resets to page 1 when a filter changes after navigating to a later page', async () => {
+    requestsApi.getAllRequests.mockResolvedValue({
+      items: [OPEN_REQUEST],
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    render(<ReviewQueuePage />)
+    await waitFor(() => expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    await waitFor(() => {
+      expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+        'reviewer-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+
+    const searchBox = screen.getByPlaceholderText(/search by id/i)
+    fireEvent.change(searchBox, { target: { value: 'monitor' } })
+
+    await waitFor(
+      () => {
+        expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+          'reviewer-token',
+          expect.objectContaining({ search: 'monitor', page: 1 })
         )
       },
       { timeout: 2000 }

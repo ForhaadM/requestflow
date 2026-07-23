@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useUsers } from '../context/UsersContext'
-import { getAllRequests } from '../api/requests'
+import { getAllRequests, getRequestsSummary } from '../api/requests'
 import { getReviews, createReview } from '../api/reviews'
 import { StatusBadge, PriorityBadge, DecisionBadge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
@@ -13,10 +13,14 @@ import { BarChart } from '../components/BarChart'
 import { AdminAnalyticsSection } from '../components/AdminAnalyticsSection'
 import { SortableColumnHeader } from '../components/SortableColumnHeader'
 import { RequestDetailPanel } from '../components/RequestDetailPanel'
+import { Pagination } from '../components/Pagination'
 import { formatDateTime } from '../lib/formatDate'
 import { REQUEST_TYPES, requestTypeLabel, decisionVerbsFor } from '../lib/requestTypes'
-import { priorityRank, PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
+import { PRIORITY_ORDER, PRIORITY_LABELS } from '../lib/priority'
 import { useColumnSort } from '../lib/useColumnSort'
+
+const TABLE_PAGE_SIZE = 25
+const REVIEWS_PAGE_SIZE = 25
 
 function ChevronIcon({ expanded }) {
   return (
@@ -53,13 +57,6 @@ const FILTER_STATUS_LABELS = { ...STATUS_LABELS, cancelled: 'Cancelled' }
 // Single hue for every bar: type is nominal (position + label already carry
 // identity), so color doesn't need to distinguish categories here.
 const TYPE_BAR_COLOR = '#4f46e5'
-
-function tally(items, key) {
-  return items.reduce((acc, item) => {
-    acc[item[key]] = (acc[item[key]] || 0) + 1
-    return acc
-  }, {})
-}
 
 function OverrideRow({ request, token, onOverridden, onCancel }) {
   const [comment, setComment] = useState('')
@@ -137,9 +134,16 @@ function OverrideRow({ request, token, onOverridden, onCancel }) {
 export function AdminDashboardPage() {
   const { token, user } = useAuth()
   const { nameFor, emailFor } = useUsers()
-  const [requests, setRequests] = useState([])
+  const [summary, setSummary] = useState({ total: 0, by_status: {}, by_type: {} })
   const [tableRequests, setTableRequests] = useState([])
+  const [tableTotal, setTableTotal] = useState(0)
+  const [tableTotalPages, setTableTotalPages] = useState(0)
+  const [tablePage, setTablePage] = useState(1)
   const [reviews, setReviews] = useState([])
+  const [reviewsTotal, setReviewsTotal] = useState(0)
+  const [reviewsTotalPages, setReviewsTotalPages] = useState(0)
+  const [reviewsPage, setReviewsPage] = useState(1)
+  const [reviewsLoading, setReviewsLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [tableLoading, setTableLoading] = useState(true)
   const [error, setError] = useState('')
@@ -151,25 +155,49 @@ export function AdminDashboardPage() {
   const [expandedRequestId, setExpandedRequestId] = useState(null)
   const [expandedReviewId, setExpandedReviewId] = useState(null)
 
+  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
+
   // The charts and "Total requests" tile above always reflect the full,
   // unfiltered system — only the "All requests" table below is scoped by
   // search/filters, via `tableRequests`/loadTable.
   function load() {
-    Promise.all([getAllRequests(token), getReviews(token)])
-      .then(([r, rv]) => {
-        setRequests(r)
-        setReviews(rv)
-      })
+    getRequestsSummary(token)
+      .then(setSummary)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }
 
   function loadTable() {
     setTableLoading(true)
-    getAllRequests(token, { search, status: statusFilter, priority: priorityFilter, request_type: typeFilter })
-      .then(setTableRequests)
+    getAllRequests(token, {
+      search,
+      status: statusFilter,
+      priority: priorityFilter,
+      request_type: typeFilter,
+      page: tablePage,
+      page_size: TABLE_PAGE_SIZE,
+      sort: activeColumn,
+      sort_dir: direction,
+    })
+      .then((response) => {
+        setTableRequests(response.items)
+        setTableTotal(response.total)
+        setTableTotalPages(response.total_pages)
+      })
       .catch((err) => setError(err.message))
       .finally(() => setTableLoading(false))
+  }
+
+  function loadReviews() {
+    setReviewsLoading(true)
+    getReviews(token, { page: reviewsPage, page_size: REVIEWS_PAGE_SIZE })
+      .then((response) => {
+        setReviews(response.items)
+        setReviewsTotal(response.total)
+        setReviewsTotalPages(response.total_pages)
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setReviewsLoading(false))
   }
 
   useEffect(() => {
@@ -180,7 +208,19 @@ export function AdminDashboardPage() {
   useEffect(() => {
     loadTable()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, search, statusFilter, priorityFilter, typeFilter])
+  }, [token, search, statusFilter, priorityFilter, typeFilter, tablePage, activeColumn, direction])
+
+  useEffect(() => {
+    loadReviews()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, reviewsPage])
+
+  // Changing a filter or sort column should show page 1 of the new result
+  // set, not whatever page the previous view happened to be on.
+  useEffect(() => {
+    setTablePage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter, priorityFilter, typeFilter, activeColumn, direction])
 
   // A request created through the chat widget (which stays mounted across
   // navigation, unlike the New Request form's own page) broadcasts this
@@ -189,44 +229,26 @@ export function AdminDashboardPage() {
     function handleChanged() {
       load()
       loadTable()
+      loadReviews()
     }
     window.addEventListener('requests:changed', handleChanged)
     return () => window.removeEventListener('requests:changed', handleChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, search, statusFilter, priorityFilter, typeFilter])
+  }, [token, search, statusFilter, priorityFilter, typeFilter, tablePage, activeColumn, direction, reviewsPage])
 
-  function requestTypeFor(requestId) {
-    return requests.find((r) => r.request_id === requestId)?.request_type
-  }
+  const byStatus = summary.by_status || {}
+  const byType = summary.by_type || {}
 
-  function requestFor(requestId) {
-    return requests.find((r) => r.request_id === requestId)
-  }
-
-  const byStatus = useMemo(() => tally(requests, 'status'), [requests])
-  const byType = useMemo(() => tally(requests, 'request_type'), [requests])
-
-  const { activeColumn, direction, toggleColumn } = useColumnSort('created', ['priority', 'created'])
-
-  const visibleRequests = useMemo(() => {
-    const sorted = [...tableRequests]
-    if (activeColumn === 'priority') {
-      sorted.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
-    } else {
-      sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    }
-    if (direction === 'desc') sorted.reverse()
-    return sorted
-  }, [tableRequests, activeColumn, direction])
+  const visibleRequests = tableRequests
 
   function handleOverridden(requestId, review, newStatus) {
-    setRequests((prev) =>
-      prev.map((r) => (r.request_id === requestId ? { ...r, status: newStatus } : r))
-    )
     setTableRequests((prev) =>
       prev.map((r) => (r.request_id === requestId ? { ...r, status: newStatus } : r))
     )
-    setReviews((prev) => [...prev, review])
+    // The override created a new review, so re-fetch the (paginated) reviews
+    // list rather than appending locally — appending would desync from
+    // `reviewsTotal`/`reviewsTotalPages`.
+    loadReviews()
     setOverridingId(null)
   }
 
@@ -239,7 +261,7 @@ export function AdminDashboardPage() {
         subtitle="All requests and reviews in the system."
         action={
           <div className="text-right">
-            <p className="text-5xl font-semibold tabular-nums text-white">{requests.length}</p>
+            <p className="text-5xl font-semibold tabular-nums text-white">{summary.total}</p>
             <p className="mt-1 text-xs font-medium uppercase tracking-wide text-indigo-100">Total requests</p>
           </div>
         }
@@ -313,7 +335,7 @@ export function AdminDashboardPage() {
           </div>
         </div>
 
-        <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div data-testid="all-requests-section" className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table data-testid="all-requests-table" className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -419,12 +441,21 @@ export function AdminDashboardPage() {
               })}
             </tbody>
           </table>
+          {!tableLoading && tableTotal > 0 && (
+            <Pagination
+              page={tablePage}
+              totalPages={tableTotalPages}
+              total={tableTotal}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setTablePage}
+            />
+          )}
         </div>
       </section>
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">All reviews</h2>
-        <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div data-testid="all-reviews-section" className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table data-testid="all-reviews-table" className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -437,9 +468,23 @@ export function AdminDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {reviews.map((rv) => {
+              {reviewsLoading && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                    <Spinner />
+                  </td>
+                </tr>
+              )}
+              {!reviewsLoading && reviews.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                    No reviews yet.
+                  </td>
+                </tr>
+              )}
+              {!reviewsLoading && reviews.map((rv) => {
                 const expanded = expandedReviewId === rv.review_id
-                const request = requestFor(rv.request_reference)
+                const request = rv.request
                 return (
                   <Fragment key={rv.review_id}>
                     <tr
@@ -454,7 +499,7 @@ export function AdminDashboardPage() {
                       <td className="px-4 py-3 text-slate-600">#{rv.request_reference}</td>
                       <td className="px-4 py-3 text-slate-600">{nameFor(rv.reviewer_reference)}</td>
                       <td className="px-4 py-3">
-                        <DecisionBadge decision={rv.decision} requestType={requestTypeFor(rv.request_reference)} />
+                        <DecisionBadge decision={rv.decision} requestType={request.request_type} />
                       </td>
                       <td className="max-w-xs truncate px-4 py-3 text-slate-600">{rv.comment_text || '—'}</td>
                       <td className="px-4 py-3 text-slate-500">{formatDateTime(rv.reviewed_at)}</td>
@@ -462,18 +507,14 @@ export function AdminDashboardPage() {
                     {expanded && (
                       <tr className="bg-slate-50">
                         <td colSpan={6} className="px-4 py-4">
-                          {request ? (
-                            <RequestDetailPanel
-                              request={request}
-                              token={token}
-                              requesterEmail={emailFor(request.requester_reference)}
-                              canAddComment={request.status !== 'cancelled'}
-                              currentUserId={user.user_id}
-                              resolvedAt={rv.reviewed_at}
-                            />
-                          ) : (
-                            <p className="text-sm text-slate-500">Request details are no longer available.</p>
-                          )}
+                          <RequestDetailPanel
+                            request={request}
+                            token={token}
+                            requesterEmail={emailFor(request.requester_reference)}
+                            canAddComment={request.status !== 'cancelled'}
+                            currentUserId={user.user_id}
+                            resolvedAt={rv.reviewed_at}
+                          />
                         </td>
                       </tr>
                     )}
@@ -482,6 +523,15 @@ export function AdminDashboardPage() {
               })}
             </tbody>
           </table>
+          {!reviewsLoading && reviewsTotal > 0 && (
+            <Pagination
+              page={reviewsPage}
+              totalPages={reviewsTotalPages}
+              total={reviewsTotal}
+              pageSize={REVIEWS_PAGE_SIZE}
+              onPageChange={setReviewsPage}
+            />
+          )}
         </div>
       </section>
     </div>

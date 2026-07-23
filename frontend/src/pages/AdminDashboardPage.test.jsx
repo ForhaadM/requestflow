@@ -66,6 +66,7 @@ const REVIEW = {
   decision: 'APPROVED',
   comment_text: 'Approved, shipped a keyboard',
   reviewed_at: '2026-07-11T00:00:00',
+  request: APPROVED_REQUEST,
 }
 
 const EMPTY_ANALYTICS = {
@@ -86,14 +87,34 @@ function emailFor(id) {
   return { 2: 'rita@example.com', 3: 'ravi@example.com' }[id] || null
 }
 
+const ALL_REQUESTS = [OPEN_REQUEST, APPROVED_REQUEST, CANCELLED_REQUEST]
+
 beforeEach(() => {
   vi.clearAllMocks()
   AuthContextModule.useAuth.mockReturnValue({ token: 'admin-token', user: ADMIN })
   UsersContextModule.useUsers.mockReturnValue({ nameFor, emailFor })
-  requestsApi.getAllRequests.mockResolvedValue([OPEN_REQUEST, APPROVED_REQUEST, CANCELLED_REQUEST])
+  requestsApi.getAllRequests.mockResolvedValue({
+    items: ALL_REQUESTS,
+    total: ALL_REQUESTS.length,
+    page: 1,
+    page_size: 25,
+    total_pages: 1,
+  })
+  requestsApi.getRequestsSummary.mockResolvedValue({
+    total: ALL_REQUESTS.length,
+    by_status: { open: 1, approved: 1, cancelled: 1 },
+    by_type: { hardware: 2, software: 1 },
+    claimed_by_me: 0,
+  })
   requestsApi.getRequestComments.mockResolvedValue([])
   requestsApi.addRequestComment.mockResolvedValue({})
-  reviewsApi.getReviews.mockResolvedValue([REVIEW])
+  reviewsApi.getReviews.mockResolvedValue({
+    items: [REVIEW],
+    total: 1,
+    page: 1,
+    page_size: 25,
+    total_pages: 1,
+  })
   analyticsApi.getAdminAnalytics.mockResolvedValue(EMPTY_ANALYTICS)
 })
 
@@ -155,12 +176,31 @@ describe('AdminDashboardPage — expandable request/review detail', () => {
     expect(screen.getByPlaceholderText('Add a comment…')).toBeInTheDocument()
   })
 
+  it('shows pagination controls on the "All reviews" table and requests the next page on click', async () => {
+    reviewsApi.getReviews.mockResolvedValue({
+      items: [REVIEW],
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    render(<AdminDashboardPage />)
+    const reviewsSection = await screen.findByTestId('all-reviews-section')
+    await waitFor(() => expect(within(reviewsSection).getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(within(reviewsSection).getByRole('button', { name: /next/i }))
+
+    await waitFor(() => {
+      expect(reviewsApi.getReviews).toHaveBeenCalledWith('admin-token', expect.objectContaining({ page: 2 }))
+    })
+  })
+
   it('re-fetches the "All requests" table with the search term once the debounce settles, without re-fetching the chart totals', async () => {
     render(<AdminDashboardPage />)
     const requestsTable = await screen.findByTestId('all-requests-table')
     await waitFor(() => expect(within(requestsTable).getByText('#1')).toBeInTheDocument())
 
-    requestsApi.getAllRequests.mockClear()
+    requestsApi.getRequestsSummary.mockClear()
     const searchBox = screen.getByPlaceholderText(/search by id/i)
     fireEvent.change(searchBox, { target: { value: 'monitor' } })
 
@@ -173,9 +213,65 @@ describe('AdminDashboardPage — expandable request/review detail', () => {
       },
       { timeout: 2000 }
     )
-    // The unfiltered call (used for the by-status/by-type charts) only takes
-    // no arguments beyond the token — confirm search didn't leak into it.
-    expect(requestsApi.getAllRequests).not.toHaveBeenCalledWith('admin-token')
+    // The chart/tile data (getRequestsSummary) isn't scoped by the "All
+    // requests" table's own search box — confirm it wasn't re-fetched.
+    expect(requestsApi.getRequestsSummary).not.toHaveBeenCalled()
+  })
+
+  it('shows pagination controls on the "All requests" table and requests the next page on click', async () => {
+    requestsApi.getAllRequests.mockResolvedValue({
+      items: ALL_REQUESTS,
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    render(<AdminDashboardPage />)
+    const requestsSection = await screen.findByTestId('all-requests-section')
+    await waitFor(() => expect(within(requestsSection).getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(within(requestsSection).getByRole('button', { name: /next/i }))
+
+    await waitFor(() => {
+      expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+        'admin-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+  })
+
+  it('resets the "All requests" table to page 1 when a filter changes after navigating to a later page', async () => {
+    requestsApi.getAllRequests.mockResolvedValue({
+      items: ALL_REQUESTS,
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    render(<AdminDashboardPage />)
+    const requestsSection = await screen.findByTestId('all-requests-section')
+    await waitFor(() => expect(within(requestsSection).getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(within(requestsSection).getByRole('button', { name: /next/i }))
+    await waitFor(() => {
+      expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+        'admin-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+
+    const searchBox = screen.getByPlaceholderText(/search by id/i)
+    fireEvent.change(searchBox, { target: { value: 'monitor' } })
+
+    await waitFor(
+      () => {
+        expect(requestsApi.getAllRequests).toHaveBeenCalledWith(
+          'admin-token',
+          expect.objectContaining({ search: 'monitor', page: 1 })
+        )
+      },
+      { timeout: 2000 }
+    )
   })
 
   it('toggling one "All requests" row does not affect another row\'s expansion state', async () => {

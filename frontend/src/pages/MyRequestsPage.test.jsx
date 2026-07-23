@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MyRequestsPage } from './MyRequestsPage'
@@ -39,7 +39,14 @@ function renderAt(path) {
 beforeEach(() => {
   vi.clearAllMocks()
   AuthContextModule.useAuth.mockReturnValue({ token: 'requester-token', user: REQUESTER })
-  requestsApi.getMyRequests.mockResolvedValue([MY_REQUEST])
+  requestsApi.getMyRequests.mockResolvedValue({
+    items: [MY_REQUEST],
+    total: 1,
+    page: 1,
+    page_size: 25,
+    total_pages: 1,
+  })
+  requestsApi.getMyRequestsSummary.mockResolvedValue({ total: 1, by_status: { open: 1 } })
   requestsApi.getRequestComments.mockResolvedValue([])
 })
 
@@ -63,5 +70,58 @@ describe('MyRequestsPage deep link', () => {
     // Own request row is present in the list (as always) but nothing is
     // auto-expanded, since the deep-linked ID never matched anything here.
     expect(screen.queryByText(/waiting for a reviewer/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('MyRequestsPage pagination', () => {
+  it('shows pagination controls and requests the next page on click', async () => {
+    requestsApi.getMyRequests.mockResolvedValue({
+      items: [MY_REQUEST],
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    renderAt('/requests/mine')
+    await waitFor(() => expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+
+    await waitFor(() => {
+      expect(requestsApi.getMyRequests).toHaveBeenCalledWith(
+        'requester-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+  })
+
+  it('resets to page 1 when the status filter changes after navigating to a later page', async () => {
+    requestsApi.getMyRequests.mockResolvedValue({
+      items: [MY_REQUEST],
+      total: 60,
+      page: 1,
+      page_size: 25,
+      total_pages: 3,
+    })
+    renderAt('/requests/mine')
+    await waitFor(() => expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    await waitFor(() => {
+      expect(requestsApi.getMyRequests).toHaveBeenCalledWith(
+        'requester-token',
+        expect.objectContaining({ page: 2 })
+      )
+    })
+
+    fireEvent.click(screen.getByText('Status: all'))
+    fireEvent.click(screen.getByRole('button', { name: 'open' }))
+
+    await waitFor(() => {
+      expect(requestsApi.getMyRequests).toHaveBeenCalledWith(
+        'requester-token',
+        expect.objectContaining({ status: 'open', page: 1 })
+      )
+    })
   })
 })

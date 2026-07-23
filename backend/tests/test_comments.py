@@ -1,3 +1,25 @@
+from sqlalchemy import event
+
+
+def _count_queries(engine, fn):
+    """Runs `fn` and returns how many SQL statements it issued — used to prove
+    list_comments_for_request's commenter-name lookup is a single batched
+    query regardless of how many distinct commenters there are, not one
+    query per commenter (N+1)."""
+    count = 0
+
+    def before_cursor_execute(*args, **kwargs):
+        nonlocal count
+        count += 1
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)
+    return count
+
+
 def _create_request(client, headers, description="Test request"):
     response = client.post("/requests", json={"request_type": "hardware", "description": description}, headers=headers)
     assert response.status_code == 200
@@ -221,3 +243,28 @@ def test_comments_returned_in_chronological_order(client, auth_headers):
     response = client.get(f"/requests/{request_id}/comments", headers=auth_headers)
     texts = [c["comment_text"] for c in response.json()]
     assert texts == ["first", "second"]
+
+
+def test_list_comments_query_count_does_not_grow_with_distinct_commenters(client, auth_headers, make_user, db_session):
+    """Guards the batched commenter-name lookup in list_comments_for_request:
+    the number of SQL statements GET /requests/{id}/comments issues should be
+    the same whether 1 or 3 distinct people have commented, not one extra
+    query per distinct commenter. (make_user logs in via the real /login
+    route, which is rate-limited, so this stays well under that cap rather
+    than creating a large number of commenters.)"""
+    request_id = _create_request(client, auth_headers)
+    engine = db_session.get_bind()
+
+    first_admin = make_user(role="admin")
+    client.post(f"/requests/{request_id}/comments", json={"comment_text": "note"}, headers=first_admin["headers"])
+    count_with_one_commenter = _count_queries(
+        engine, lambda: client.get(f"/requests/{request_id}/comments", headers=auth_headers)
+    )
+
+    for admin in (make_user(role="admin"), make_user(role="admin")):
+        client.post(f"/requests/{request_id}/comments", json={"comment_text": "note"}, headers=admin["headers"])
+    count_with_three_commenters = _count_queries(
+        engine, lambda: client.get(f"/requests/{request_id}/comments", headers=auth_headers)
+    )
+
+    assert count_with_one_commenter == count_with_three_commenters
